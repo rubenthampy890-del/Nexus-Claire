@@ -170,14 +170,21 @@ export class NexusCritic {
                 }
             }
 
-            // 4. Terminal command validation
+            // 4. Terminal command validation + CWD Guard
             if (toolName === 'terminal.run' && params.command) {
                 const cmd = (params.command as string).toLowerCase();
-                const blockedCommands = ['sudo rm -rf /', 'dd if=/dev/zero', ':(){ :|:& };:', 'chmod -R 777 /'];
+                const blockedCommands = ['sudo rm -rf /', 'dd if=/dev/zero', ':(){ :|:& };:', 'chmod -R 777 /', 'mkfs'];
                 for (const blocked of blockedCommands) {
                     if (cmd.includes(blocked)) {
                         return { action: 'block', reason: `Blocked destructive command: "${blocked}"` };
                     }
+                }
+
+                // CWD Guard: prevent operations in / (root) or /System unless explicitly authorized
+                const cwd = (params.cwd || process.cwd()) as string;
+                const criticalPaths = ['/', '/System', '/usr/bin', '/etc', '/var/root'];
+                if (criticalPaths.includes(cwd)) {
+                    return { action: 'block', reason: `High-risk directory access denied: ${cwd}. Operations must happen within the user workspace.` };
                 }
             }
 

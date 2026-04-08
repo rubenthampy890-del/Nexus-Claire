@@ -12,6 +12,10 @@ import type { Service } from "./services/service-registry";
 import { engineer } from "../agents/engineer";
 import { voiceStream } from "./voice-stream";
 import { identity } from "./identity";
+import { PlatformUtils } from "./platform";
+import { readFileSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { skillEngine } from "./skill-engine";
 import { socialPersona } from "../agents/social-persona";
 import { TelemetryBot } from "../services/telemetry-bot";
@@ -569,6 +573,28 @@ export class NexusBrain implements Service {
                     }
                     lastGoalCount = completedGoals.length;
                     continue;
+                }
+
+                // 3. Vision Awareness (Every 5 minutes)
+                if (Math.random() > 0.8) { // ~20% of 60s cycles ~= every 5 mins
+                    const screenshotPath = join(tmpdir(), `nexus_vision_${Date.now()}.png`);
+                    try {
+                        console.log("[PROACTIVE] Capturing vision heartbeat...");
+                        await PlatformUtils.captureScreen(screenshotPath);
+                        const base64 = readFileSync(screenshotPath, { encoding: 'base64' });
+
+                        // Async extraction to avoid loop blocking
+                        extractor.extractAndStore("", telemetry.activeApp, {
+                            base64,
+                            mime: "image/png"
+                        }).then(() => {
+                            this.broadcastToUI('LOG', "[PROACTIVE] Vision context synced to vault.");
+                        });
+
+                        unlinkSync(screenshotPath);
+                    } catch (err: any) {
+                        console.error("[PROACTIVE] Vision capture failed:", err.message);
+                    }
                 }
 
                 // ─── AMBIENT AWARENESS (Only every ~15min equivalent) ───

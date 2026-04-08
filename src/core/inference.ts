@@ -5,6 +5,7 @@ import { identity } from "./identity";
 export type Message = {
     role: 'user' | 'assistant' | 'system';
     content: string;
+    image?: { data: string; mimeType: string }; // Base64 data and mime type for vision
 };
 
 /**
@@ -275,14 +276,36 @@ export class InferenceService {
 
     private async queryGemini(messages: Message[]): Promise<string> {
         // Convert to Google SDK format for genai
-        const history = messages.slice(0, -1).map(m => ({
-            role: m.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: m.content }]
-        }));
-        const lastMessage = messages.length > 0 ? messages[messages.length - 1]!.content : "";
+        const history = messages.slice(0, -1).map(m => {
+            const parts: any[] = [{ text: m.content }];
+            if (m.image) {
+                parts.push({
+                    inlineData: {
+                        data: m.image.data,
+                        mimeType: m.image.mimeType
+                    }
+                });
+            }
+            return {
+                role: m.role === 'assistant' ? 'model' : 'user',
+                parts
+            };
+        });
 
-        // Push the last message as the new user input at the end of the history array
-        const allMessages = [...history, { role: 'user', parts: [{ text: lastMessage }] }];
+        const lastMessage = messages[messages.length - 1];
+        if (!lastMessage) return "Directive acknowledged.";
+
+        const lastParts: any[] = [{ text: lastMessage.content }];
+        if (lastMessage.image) {
+            lastParts.push({
+                inlineData: {
+                    data: lastMessage.image.data,
+                    mimeType: lastMessage.image.mimeType
+                }
+            });
+        }
+
+        const allMessages = [...history, { role: 'user', parts: lastParts }];
 
         const response = await this.geminiClient.models.generateContent({
             model: this.geminiModelId,

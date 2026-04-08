@@ -123,14 +123,57 @@ export class NexusKnowledgeExtractor {
     }
 
     /**
-     * Primary extraction method: tries LLM first, falls back to local regex.
+     * Vision-based extraction (detects what the user is looking at/doing)
+     */
+    public async extractFromImage(base64Image: string, mimeType: string = "image/png"): Promise<{ entities: ExtractedEntity[], facts: ExtractedFact[] }> {
+        try {
+            const prompt = `
+            Analyze this screenshot from the user's desktop.
+            What application is open? What is the user working on?
+            Extract any relevant entities or facts about their current state.
+            
+            FORMAT: JSON object with { "entities": [ { "name", "type", "description" } ], "facts": [ { "entity", "fact" } ] }
+            Focus on: Active Project, Open Tools, Web Contents, Terminal Context.`;
+
+            const response = await inference.chat([{
+                role: 'user',
+                content: prompt,
+                image: { data: base64Image, mimeType }
+            }]);
+
+            const jsonStr = response.replace(/```json|```/g, "").trim();
+            const data = JSON.parse(jsonStr);
+            return {
+                entities: data.entities || [],
+                facts: data.facts || []
+            };
+        } catch (e) {
+            console.error("[EXTRACTOR] Vision extraction failed:", e);
+            return { entities: [], facts: [] };
+        }
+    }
+
+    /**
+     * Primary extraction method: tries LLM (Text or Vision) first, falls back to local regex.
      * De-duplicates against recent extractions.
      */
-    public async extractAndStore(text: string, context?: string): Promise<void> {
+    public async extractAndStore(text: string, context?: string, visionData?: { base64: string, mime: string }): Promise<void> {
         console.log("[EXTRACTOR] Processing knowledge extraction...");
 
-        // Try LLM-powered extraction first
-        let { entities, facts } = await this.extract(text, context);
+        let entities: ExtractedEntity[] = [];
+        let facts: ExtractedFact[] = [];
+
+        // 1. Process Vision if provided
+        if (visionData) {
+            const visionResult = await this.extractFromImage(visionData.base64, visionData.mime);
+            entities.push(...visionResult.entities);
+            facts.push(...visionResult.facts);
+        }
+
+        // 2. Process Text
+        const textResult = await this.extract(text, context);
+        entities.push(...textResult.entities);
+        facts.push(...textResult.facts);
 
         // If LLM returned nothing (quota/network error), use local fallback
         if (entities.length === 0 && facts.length === 0) {
@@ -148,12 +191,7 @@ export class NexusKnowledgeExtractor {
             return true;
         });
 
-        // Prune the dedup buffer if it grows too large
-        if (this.recentFacts.size > 500) {
-            const arr = [...this.recentFacts];
-            this.recentFacts = new Set(arr.slice(-200));
-        }
-
+        // Store result in Vault
         for (const entity of entities) {
             try {
                 (vault as any).db.run(
@@ -167,10 +205,6 @@ export class NexusKnowledgeExtractor {
             try {
                 await vault.storeFact(fact.entity, fact.fact, fact.relevance);
             } catch (e) { }
-        }
-
-        if (entities.length > 0 || newFacts.length > 0) {
-            console.log(`[EXTRACTOR] ✅ Extracted ${entities.length} entities and ${newFacts.length} new facts.`);
         }
     }
 }
