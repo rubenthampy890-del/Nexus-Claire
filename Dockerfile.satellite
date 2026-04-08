@@ -1,0 +1,22 @@
+# ─── Nexus Claire: Satellite Worker ───
+# Lightweight image for deploying ONLY the satellite daemon.
+# Perfect for Colab, HF Spaces, Railway, Fly.io, etc.
+FROM oven/bun:1-slim
+WORKDIR /app
+
+# Copy only what the satellite needs
+COPY package.json bun.lock* ./
+RUN bun install --frozen-lockfile 2>/dev/null || bun install
+
+COPY src/core/satellite.ts src/core/satellite.ts
+COPY src/core/inference.ts src/core/inference.ts
+COPY src/core/identity.ts src/core/identity.ts
+COPY src/core/cli-ui.ts src/core/cli-ui.ts
+COPY tsconfig.json ./
+
+# The satellite only needs the WS port for health checks
+EXPOSE 18790
+
+ENV NODE_ENV=production
+
+ENTRYPOINT ["bun", "run", "src/core/satellite.ts"]

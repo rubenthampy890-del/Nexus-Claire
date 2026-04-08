@@ -1,0 +1,50 @@
+{
+  "name": "nexus-claire",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run nexus.ts",
+    "brain": "bun run src/core/brain.ts",
+    "dash": "cd dashboard && npm run dev",
+    "satellite": "bun run src/core/satellite.ts",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "verify": "bun run test-nexus-4-swarms.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/chalk": "2.2.4",
+    "@types/js-yaml": "^4.0.9",
+    "concurrently": "^9.2.1",
+    "electron": "^41.1.1",
+    "electron-builder": "^26.8.1",
+    "wait-on": "^9.0.4"
+  },
+  "peerDependencies": {
+    "typescript": "^6.0.2"
+  },
+  "dependencies": {
+    "@google/genai": "^1.48.0",
+    "@playwright/test": "^1.59.1",
+    "@supabase/supabase-js": "^2.101.1",
+    "axios": "^1.14.0",
+    "chalk": "5.4.1",
+    "dotenv": "^17.4.0",
+    "edge-tts-universal": "^1.4.0",
+    "groq-sdk": "^1.1.2",
+    "js-yaml": "^4.1.1",
+    "playwright": "^1.59.1",
+    "playwright-core": "^1.59.1",
+    "sqlite3": "^6.0.1",
+    "telegraf": "^4.16.3",
+    "tesseract.js": "^7.0.0",
+    "ws": "^8.20.0",
+    "zod": "^4.3.6"
+  },
+  "trustedDependencies": [
+    "protobufjs",
+    "speaker"
+  ]
+}

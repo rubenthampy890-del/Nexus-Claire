@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  nexus-brain:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nexus-claire
+    ports:
+      - "18790:18790" # WebSocket (Neural Core)
+      - "5173:5173" # Dashboard (if serving static)
+    env_file:
+      - .env
+    volumes:
+      - nexus-data:/app/vault # Persistent memory vault
+      - nexus-db:/app/data # SQLite database
+      - nexus-logs:/app/logs # Logs
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "bun", "-e", "fetch('http://localhost:18790').catch(() => process.exit(1))" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  nexus-data:
+  nexus-db:
+  nexus-logs:

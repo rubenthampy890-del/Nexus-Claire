@@ -1,0 +1,57 @@
+# dependencies
+node_modules/
+
+# build output
+out/
+dist/
+*.tgz
+
+# code coverage
+coverage/
+*.lcov
+
+# logs
+*.log
+
+# dotenv environment variable files
+.env
+.env.*.local
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IDEs
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
+
+# databases (runtime-generated)
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+
+# runtime directories
+tmp/
+logs/
+learned-skills/
+memory/
+
+# binary artifacts — never commit these
+*.mp3
+*.wav
+*.mp4
+*.zip
+*.tar.gz
+link
+
+# test artifacts
+test.txt
+test_audio.*
+
+# Bun
+bun.lock
