@@ -17,6 +17,7 @@ export class NexusKeychain {
     private storagePath: string;
     private masterKey: Buffer | null = null;
     private keys: Record<string, string> = {}; // Decrypted state (only in memory)
+    private locked: boolean = true;
 
     constructor() {
         const dataDir = join(process.cwd(), "data");
@@ -56,17 +57,19 @@ export class NexusKeychain {
             decrypted = Buffer.concat([decrypted, decipher.final()]);
 
             this.keys = JSON.parse(decrypted.toString("utf8"));
+            this.locked = false;
             console.log(`[KEYCHAIN] Unlocked. Loaded ${Object.keys(this.keys).length} credentials.`);
             return true;
         } catch (e) {
             console.error("[KEYCHAIN] Failed to unlock. Incorrect PIN or corrupted data.");
             this.masterKey = null;
+            this.locked = true;
             return false;
         }
     }
 
     public isUnlocked(): boolean {
-        return this.masterKey !== null;
+        return !this.locked && this.masterKey !== null;
     }
 
     public get(id: string): string | null {

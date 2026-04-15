@@ -1,7 +1,7 @@
 # ElevenLabs
-Type: API/Tool
+Type: Tool
 
-An API related to speaking capabilities
+An AI audio and voice synthesis platform
 
 --- 
-Last Active: 2026-04-06 06:38:45
+Last Active: 2026-04-08 06:09:19

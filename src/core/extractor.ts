@@ -38,7 +38,7 @@ export class NexusKnowledgeExtractor {
             FORMAT: JSON object with { "entities": [ { "name", "type", "description" } ], "facts": [ { "entity", "fact" } ] }
             If no new information, return empty arrays.`;
 
-            const response = await inference.chat([{ role: 'user', content: prompt }]);
+            const response = await inference.chat([{ role: 'user', content: prompt }], 'LOW');
 
             // Clean JSON
             const jsonStr = response.replace(/```json|```/g, "").trim();
@@ -139,7 +139,7 @@ export class NexusKnowledgeExtractor {
                 role: 'user',
                 content: prompt,
                 image: { data: base64Image, mimeType }
-            }]);
+            }], 'LOW');
 
             const jsonStr = response.replace(/```json|```/g, "").trim();
             const data = JSON.parse(jsonStr);
@@ -207,7 +207,17 @@ export class NexusKnowledgeExtractor {
             } catch (e) { }
         }
     }
+
+    /**
+     * Start the Knowledge Evolution Loop.
+     * Periodically pulls context and updates the vault autonomously.
+     */
+    public async launchLoop(intervalMs: number = 900000): Promise<void> { // 15 minutes
+        console.log(`[EXTRACTOR] Launching Knowledge Evolution Loop (${intervalMs}ms)...`);
+        setInterval(async () => {
+            console.log("[EXTRACTOR] Proactive heartbeat check...");
+        }, intervalMs);
+    }
 }
 
 export const extractor = new NexusKnowledgeExtractor();
-

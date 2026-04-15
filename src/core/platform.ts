@@ -62,6 +62,30 @@ export const PlatformUtils = {
     },
 
     /**
+     * Gets Disk Usage Percentage for the boot drive.
+     */
+    async getDiskUsage(): Promise<number> {
+        try {
+            let cmd = "";
+            switch (platform) {
+                case "darwin":
+                    cmd = `df -h / | tail -1 | awk '{print $5}' | sed 's/%//'`;
+                    break;
+                case "linux":
+                    cmd = `df -h / | tail -1 | awk '{print $5}' | sed 's/%//'`;
+                    break;
+                case "win32":
+                    cmd = `powershell -c "(Get-WmiObject Win32_LogicalDisk -Filter 'DeviceID=\\"C:\\"').Size - (Get-WmiObject Win32_LogicalDisk -Filter 'DeviceID=\\"C:\\"').FreeSpace / (Get-WmiObject Win32_LogicalDisk -Filter 'DeviceID=\\"C:\\"').Size * 100"`;
+                    break;
+            }
+            const { stdout } = await execAsync(cmd);
+            return parseFloat(stdout.trim()) || 0;
+        } catch {
+            return 0;
+        }
+    },
+
+    /**
      * Synchronous variant for legacy monitors.
      */
     getCPUUsageSync(): number {
@@ -94,5 +118,13 @@ export const PlatformUtils = {
         return platform === "win32"
             ? ["cmd", "/c", rawCommand]
             : ["sh", "-c", rawCommand];
+    },
+
+    /**
+     * Executes a command synchronously and returns the output.
+     */
+    runCommand(cmdStr: string): string {
+        const { execSync } = require("child_process");
+        return execSync(cmdStr, { encoding: "utf-8" });
     }
 };

@@ -1,5 +1,5 @@
 import type { RoleDefinition } from "./types";
-import { type ToolDefinition } from "./registry";
+import { type ToolDefinition } from "./tool-registry";
 
 export type AuthorityDecision = {
     allowed: boolean;

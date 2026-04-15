@@ -50,6 +50,40 @@ export class NexusCritic {
     private confidenceThreshold = 0.6;
     private auditLog: Array<{ timestamp: number; planSummary: string; result: CriticAuditResult }> = [];
 
+    /* ─── Adaptive Trust (Friction Reduction) ─── */
+    private trustedPatterns: Set<string> = new Set(['git status', 'git branch', 'npm --version', 'node --version']);
+    private sessionTrustUntil: number = 0;
+
+    /* ─── MacOS Security Shield Lists ─── */
+    private readonly FORBIDDEN_MAC_COMMANDS = [
+        'csrutil disable', 'csrutil clear',          // SIP disabling
+        'tmutil delete', 'tmutil thin',              // Time Machine backup destruction
+        'diskutil eraseDisk', 'diskutil partitionDisk', // Data wiping
+        'diskutil eraseVolume', 'diskutil format',
+        'nvram -d', 'nvram -c',                     // Firmware tampering
+        'rm -rf /', 'rm -rf /*', 'rm -f /*',
+        'chmod -R 000 /', 'chown -R root /',
+        'mv /* /dev/null', 'dd if=/dev/zero',        // Data destruction patterns
+        'mkfs', 'mkswap', ':(){ :|:& };:'            // General Linux/Unix destruction
+    ];
+
+    private readonly HIGH_RISK_MAC_COMMANDS = [
+        'launchctl unload', 'launchctl load', 'launchctl remove', // Service disruption
+        'networksetup', 'scutil',                                 // Network tampering
+        'defaults write com.apple.', 'defaults delete',           // Global pref changes
+        'dscl', 'dseditgroup', 'pwpolicy',                        // User/Security policies
+        'pmset', 'caffeinate',                                    // Power management
+        'kextload', 'kextunload', 'kextutil',                     // Kernel extensions
+        'softwareupdate --install',                               // Unexpected updates
+        'pkill', 'killall', 'xattr -d com.apple.quarantine'       // Process/File attribute tampering
+    ];
+
+    private readonly PROTECTED_MAC_PATHS = [
+        '/System', '/Library', '/usr/bin', '/usr/sbin', '/etc', '/var/root',
+        '~/Library/Keychains', '~/Library/Safari', '~/Library/Mail', '~/Library/Messages',
+        '~/Library/Containers', '~/.ssh', '~/.aws', '~/.config/nexus-claire'
+    ];
+
     /**
      * Audit an Architect's StepTree plan before execution.
      * Returns a pass/fail with detailed issue reporting.
@@ -133,62 +167,140 @@ export class NexusCritic {
                 return { action: 'block', reason: `Tool "${toolName}" does not exist in the registry.` };
             }
 
+            // High-Tier Code Audit for file modifications
+            if (toolName === 'fs.patch' || toolName === 'fs.write') {
+                const auditResult = this.auditCodeChange(params.path, params.content || params.replace);
+                if (!auditResult.passed) {
+                    return {
+                        action: 'block',
+                        reason: `Code quality audit failed: ${auditResult.issues.map(i => i.message).join(', ')}. Suggestions: ${auditResult.suggestions.join(' ')}`
+                    };
+                }
+            }
+
             // 1. Check if tool is optional and not allowlisted
             if (tool.optional) {
                 // For now, allow all optional tools but log it
                 console.log(`[CRITIC] ⚡ Optional tool invoked: ${toolName}`);
             }
 
-            // 2. Risk-based gating
-            if (tool.riskLevel === 'dangerous') {
-                // Check specific dangerous patterns in params
-                const paramStr = JSON.stringify(params).toLowerCase();
-                const immediateBlock = ['rm -rf /', 'sudo rm', 'mkfs', 'dd if=/dev/zero'];
-                for (const pattern of immediateBlock) {
+            // 2. MacOS Path & CWD Guard (Strict Block - Priority 1)
+            const path = (params.path as string || "").toLowerCase();
+            const cwd = (params.cwd as string || process.cwd()).toLowerCase();
+
+            for (const protectedPath of this.PROTECTED_MAC_PATHS) {
+                const expandedPath = protectedPath.replace('~', process.env.HOME || '').toLowerCase();
+                if (path.startsWith(expandedPath)) {
+                    return { action: 'block', reason: `Security Violation: Access to protected path "${protectedPath}" is forbidden.` };
+                }
+                if (cwd.startsWith(expandedPath)) {
+                    return { action: 'block', reason: `Security Violation: Operations within protected directory "${protectedPath}" are denied.` };
+                }
+            }
+
+            // 3. Risk-based gating (Command Analysis - Priority 2)
+            const paramStr = JSON.stringify(params).toLowerCase();
+            if (tool.riskLevel === 'dangerous' || toolName === 'terminal.run') {
+                // Check FORBIDDEN (Immediate Block)
+                for (const pattern of this.FORBIDDEN_MAC_COMMANDS) {
+                    if (paramStr.includes(pattern.toLowerCase())) {
+                        return { action: 'block', reason: `Strict Security Violation: Destructive command pattern "${pattern}" detected.` };
+                    }
+                }
+
+                // Check Obfuscation (e.g. base64 piping)
+                if (paramStr.includes('| base64') || paramStr.includes('| bash') || paramStr.includes('| sh')) {
+                    return { action: 'block', reason: `Security Risk: Command obfuscation or piping to shell is forbidden for this tool.` };
+                }
+
+                // Check HIGH RISK (Require Approval)
+                for (const pattern of this.HIGH_RISK_MAC_COMMANDS) {
+                    if (paramStr.includes(pattern.toLowerCase())) {
+                        return {
+                            action: 'requireApproval',
+                            reason: `High-Risk Action Detected: "${pattern}" affects core system/network stability.`,
+                            approvalId: `security-${Date.now()}-${toolName}`,
+                        };
+                    }
+                }
+
+                // 4. Adaptive Trust Check (Bypass gating if pattern is known safe)
+                if (Date.now() < this.sessionTrustUntil) {
+                    console.log(`[CRITIC] ⚡ Session Trust Active: Auto-allowing ${toolName}`);
+                    return { action: 'allow' };
+                }
+
+                for (const pattern of this.trustedPatterns) {
                     if (paramStr.includes(pattern)) {
-                        return { action: 'block', reason: `Dangerous pattern detected: "${pattern}"` };
+                        console.log(`[CRITIC] ⚡ Pattern Trust: Match "${pattern}", auto-allowing.`);
+                        return { action: 'allow' };
                     }
                 }
 
-                // Require approval for dangerous tools
-                return {
-                    action: 'requireApproval',
-                    reason: `Dangerous tool "${toolName}" requires user approval.`,
-                    approvalId: `critic-${Date.now()}-${toolName}`,
-                };
-            }
-
-            // 3. File path validation for file-ops tools
-            if (tool.category === 'file-ops' && params.path) {
-                const path = params.path as string;
-                // Block writes to system directories
-                const systemDirs = ['/System', '/usr/bin', '/etc', '/var/root'];
-                for (const dir of systemDirs) {
-                    if (path.startsWith(dir)) {
-                        return { action: 'block', reason: `Cannot write to system directory: ${dir}` };
-                    }
-                }
-            }
-
-            // 4. Terminal command validation + CWD Guard
-            if (toolName === 'terminal.run' && params.command) {
-                const cmd = (params.command as string).toLowerCase();
-                const blockedCommands = ['sudo rm -rf /', 'dd if=/dev/zero', ':(){ :|:& };:', 'chmod -R 777 /', 'mkfs'];
-                for (const blocked of blockedCommands) {
-                    if (cmd.includes(blocked)) {
-                        return { action: 'block', reason: `Blocked destructive command: "${blocked}"` };
-                    }
-                }
-
-                // CWD Guard: prevent operations in / (root) or /System unless explicitly authorized
-                const cwd = (params.cwd || process.cwd()) as string;
-                const criticalPaths = ['/', '/System', '/usr/bin', '/etc', '/var/root'];
-                if (criticalPaths.includes(cwd)) {
-                    return { action: 'block', reason: `High-risk directory access denied: ${cwd}. Operations must happen within the user workspace.` };
+                // Finally, general approval for dangerous tools
+                if (tool.riskLevel === 'dangerous') {
+                    return {
+                        action: 'requireApproval',
+                        reason: `Dangerous tool "${toolName}" requires user approval.`,
+                        approvalId: `risk-${Date.now()}-${toolName}`,
+                    };
                 }
             }
 
             return { action: 'allow' };
+        };
+    }
+
+    /**
+     * Semantically audits a code change before it is applied.
+     * Enforces professional engineering standards.
+     */
+    public auditCodeChange(filePath: string, code: string): CriticAuditResult {
+        const issues: CriticIssue[] = [];
+        const suggestions: string[] = [];
+        const lower = code.toLowerCase();
+
+        // 1. Anti-Pattern Detection
+        if (lower.includes('process.exit(') && !filePath.includes('daemon.ts') && !filePath.includes('test/')) {
+            issues.push({ severity: 'error', category: 'quality', message: 'Unauthorized process.exit call. Use error throwing or Nexus signal system instead.' });
+        }
+
+        if (lower.includes('console.log(') && (filePath.includes('src/core/') || filePath.includes('src/shared/'))) {
+            if (!lower.includes('[nexus]') && !lower.includes('[critic]') && !lower.includes('[bridge]')) {
+                issues.push({ severity: 'warning', category: 'quality', message: 'Naked console.log detected in core. Use the system logger or a tagged log.' });
+            }
+        }
+
+        // 2. Security / Risk Checks
+        if (lower.includes('dangerouslysetinnerhtml') || lower.includes('innerHTML =')) {
+            issues.push({ severity: 'error', category: 'security', message: 'XSS Risk: Direct HTML injection detected.' });
+        }
+
+        if (lower.includes('eval(') || lower.includes('new Function(')) {
+            issues.push({ severity: 'error', category: 'security', message: 'Security Risk: Dynamic code execution (eval) is forbidden.' });
+        }
+
+        // 3. Resource Leak Check
+        if (lower.includes('fs.watch') || lower.includes('setInterval(')) {
+            if (!lower.includes('unwatch') && !lower.includes('clearInterval')) {
+                issues.push({ severity: 'warning', category: 'quality', message: 'Potential resource leak: created a watcher/interval without visible cleanup logic.' });
+            }
+        }
+
+        // 4. Strict Typography/Style
+        if (code.includes('any') && !code.includes('as any') && filePath.includes('.ts')) {
+            if (!code.includes('Record<string, any>') && !code.includes('Promise<any>')) {
+                issues.push({ severity: 'warning', category: 'quality', message: 'Usage of "any" type detected. Prefer specific interfaces or unknown.' });
+            }
+        }
+
+        const passed = issues.filter(i => i.severity === 'error').length === 0;
+
+        return {
+            passed,
+            confidence: passed ? 1.0 : 0.5,
+            issues,
+            suggestions
         };
     }
 
@@ -316,17 +428,37 @@ export class NexusCritic {
         const text = typeof plan === 'string' ? plan : JSON.stringify(plan);
         const lower = text.toLowerCase();
 
-        const dangerous = [
-            { pattern: 'rm -rf /', message: 'Recursive force delete on root directory' },
+        // 1. Check STRICT FORBIDDEN (Destructive)
+        for (const pattern of this.FORBIDDEN_MAC_COMMANDS) {
+            if (lower.includes(pattern.toLowerCase())) {
+                issues.push({
+                    severity: 'error',
+                    category: 'security',
+                    message: `Critical Security violation: "${pattern}" (Host device protection)`,
+                });
+            }
+        }
+
+        // 2. Check HIGH RISK (Warning)
+        for (const pattern of this.HIGH_RISK_MAC_COMMANDS) {
+            if (lower.includes(pattern.toLowerCase())) {
+                issues.push({
+                    severity: 'warning',
+                    category: 'security',
+                    message: `High-risk operation: "${pattern}" often requires manual approval.`,
+                });
+            }
+        }
+
+        // 3. Check General Destruction
+        const generalDangerous = [
             { pattern: 'sudo', message: 'Elevated privileges requested' },
             { pattern: 'chmod 777', message: 'World-writable permissions' },
-            { pattern: 'eval(', message: 'Dynamic code evaluation' },
-            { pattern: 'process.env', message: 'Direct environment variable access' },
             { pattern: '/etc/passwd', message: 'System password file access' },
             { pattern: 'DROP TABLE', message: 'SQL destructive operation' },
         ];
 
-        for (const { pattern, message } of dangerous) {
+        for (const { pattern, message } of generalDangerous) {
             if (lower.includes(pattern.toLowerCase())) {
                 issues.push({
                     severity: 'error',
@@ -411,6 +543,21 @@ export class NexusCritic {
     public setConfidenceThreshold(threshold: number): void {
         this.confidenceThreshold = Math.max(0, Math.min(1, threshold));
         console.log(`[CRITIC] Confidence threshold set to ${this.confidenceThreshold}`);
+    }
+
+    /* ─── Adaptive Trust Management ─── */
+    public addTrustedPattern(pattern: string): void {
+        this.trustedPatterns.add(pattern.toLowerCase().trim());
+        console.log(`[CRITIC] 🔐 New Trusted Pattern: "${pattern}"`);
+    }
+
+    public enableSessionTrust(minutes: number = 30): void {
+        this.sessionTrustUntil = Date.now() + (minutes * 60 * 1000);
+        console.log(`[CRITIC] 🔓 Session Trust Enabled for ${minutes} minutes.`);
+    }
+
+    public isSessionTrustActive(): boolean {
+        return Date.now() < this.sessionTrustUntil;
     }
 }
 

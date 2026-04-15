@@ -1,4 +1,4 @@
-import { toolRegistry, type ToolDefinition, type ToolParameter } from "../registry";
+import { toolRegistry, type ToolDefinition, type ToolParameter } from "../tool-registry";
 import { mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
 
@@ -17,7 +17,7 @@ export async function developNexusTool(params: DevelopToolParams): Promise<strin
     console.log(`[DEVELOPER-TOOL] Developing new tool: ${name}...`);
 
     // Ensure tool directory exists
-    const toolDir = path.join(process.cwd(), 'src/core/tools/generated');
+    const toolDir = "/Users/basilthampy/Music/antigravity/new automative ai/nexus tools";
     if (!existsSync(toolDir)) mkdirSync(toolDir, { recursive: true });
 
     const toolFilePath = path.join(toolDir, `${name}.ts`);
@@ -26,7 +26,7 @@ export async function developNexusTool(params: DevelopToolParams): Promise<strin
 
     // Format implementation (wrapping it for registration)
     const fullImplementation = `
-import { ToolDefinition } from "../../registry";
+import { ToolDefinition } from "../Nexus-Claire/src/core/tool-registry";
 
 export const ${safeVarName}: ToolDefinition = {
   name: "${name}",
@@ -43,6 +43,36 @@ export const ${safeVarName}: ToolDefinition = {
         await Bun.write(toolFilePath, fullImplementation);
         console.log(`[DEVELOPER-TOOL] Tool ${name} written to ${toolFilePath}`);
 
+        // 1. Validation: Run TypeScript check
+        console.log(`[DEVELOPER-TOOL] Validating type safety for ${name}...`);
+        const tsc = Bun.spawnSync(["bun", "x", "tsc", "--noEmit", "--esModuleInterop", "--skipLibCheck", "--target", "ESNext", "--module", "ESNext", "--moduleResolution", "bundler", "--types", "node,bun", "--ignoreConfig", toolFilePath]);
+        if (tsc.exitCode !== 0) {
+            const error = tsc.stderr.toString() || tsc.stdout.toString();
+            throw new Error(`Tool '${name}' failed type-check validation: \n${error}`);
+        }
+
+        // 2. Validation: Run Test Cases
+        if (test_cases && test_cases.trim().length > 0) {
+            console.log(`[DEVELOPER-TOOL] Running test cases for ${name}...`);
+            const testFilePath = path.join(toolDir, `${name}.test.ts`);
+            const testCode = `
+import { expect, test, describe } from "bun:test";
+import { ${safeVarName} } from "./${name}";
+
+describe("${name} autonomous tests", () => {
+    ${test_cases}
+});
+            `;
+            await Bun.write(testFilePath, testCode);
+
+            const testRun = Bun.spawnSync(["bun", "test", testFilePath]);
+            if (testRun.exitCode !== 0) {
+                const error = testRun.stderr.toString() || testRun.stdout.toString();
+                throw new Error(`Tool '${name}' failed autonomous tests: \n${error}`);
+            }
+            console.log(`[DEVELOPER-TOOL] Tests passed for ${name}.`);
+        }
+
         // Dynamic registration via import()
         try {
             // We use a timestamp to bypass module caching for development
@@ -55,15 +85,46 @@ export const ${safeVarName}: ToolDefinition = {
             }
 
             toolRegistry.register(dynamicTool);
-            return `Success: Tool '${name}' developed, written to ${toolFilePath}, and dynamically registered. Ready for use.`;
+            return `Success: Tool '${name}' developed, validated (TSC + Tests), and registered. Ready for use.`;
         } catch (err) {
             console.warn(`[DEVELOPER-TOOL] Dynamic import failed for ${name}:`, err);
-            return `Warning: Tool '${name}' written to disk but dynamic registration failed: ${err instanceof Error ? err.message : String(err)}. You might need to restart the daemon for it to be active.`;
+            return `Warning: Tool '${name}' passed validation but dynamic registration failed: ${err instanceof Error ? err.message : String(err)}. You might need to restart the daemon for it to be active.`;
         }
-        return `Success: Tool '${name}' developed and registered. Tests skipped.`;
     } catch (err) {
         console.error(`[DEVELOPER-TOOL] Development failed for ${name}:`, err);
         return `Error developing tool '${name}': ${err instanceof Error ? err.message : String(err)}`;
+    }
+}
+
+/**
+ * Scans the absolute "nexus tools" directory and hot-loads all .ts tools.
+ */
+export async function loadGeneratedTools(): Promise<void> {
+    const toolDir = "/Users/basilthampy/Music/antigravity/new automative ai/nexus tools";
+    if (!existsSync(toolDir)) return;
+
+    console.log(`[DEVELOPER-TOOL] 📂 Loading autonomous tools from: ${toolDir}`);
+
+    const { readdirSync } = await import("node:fs");
+    const files = readdirSync(toolDir).filter(f => f.endsWith(".ts") && !f.endsWith(".test.ts"));
+
+    for (const file of files) {
+        try {
+            const toolName = file.replace(".ts", "");
+            const safeVarName = toolName.replace(/\./g, '_');
+            const filePath = path.join(toolDir, file);
+
+            // Use timestamp to bypass cache if needed, though for boot it's usually clean
+            const module = await import(`${filePath}?v=${Date.now()}`);
+            const dynamicTool = module[safeVarName];
+
+            if (dynamicTool) {
+                toolRegistry.register(dynamicTool);
+                console.log(`[DEVELOPER-TOOL] ⚡ Auto-registered: ${toolName}`);
+            }
+        } catch (err: any) {
+            console.error(`[DEVELOPER-TOOL] ❌ Failed to auto-load ${file}:`, err.message);
+        }
     }
 }
 

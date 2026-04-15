@@ -16,85 +16,84 @@ import { join } from "path";
 import { existsSync } from "fs";
 import { z } from "zod";
 import { tunnelManager } from "./src/core/tunnel";
+import { onboardManager } from "./src/core/onboard";
+import { NexusCLI } from "./src/core/cli-ui";
+import { config } from "dotenv";
 
 const ROOT = import.meta.dir;
+config({ path: join(ROOT, ".env") });
+
 const DASHBOARD_DIR = join(ROOT, "dashboard");
 
-const CYAN = "\x1b[36m";
-const GREEN = "\x1b[32m";
-const YELLOW = "\x1b[33m";
-const RED = "\x1b[31m";
-const RESET = "\x1b[0m";
-const BOLD = "\x1b[1m";
+// ────────── PORT CLEANUP ──────────
 
-function log(tag: string, color: string, msg: string) {
-    console.log(`${color}${BOLD}[${tag}]${RESET} ${msg}`);
-}
-
-function banner() {
-    console.clear();
-    console.log(`
-${CYAN}╔══════════════════════════════════════════════════════╗
-║       NEXUS CLAIRE 4.0 — SENTINEL BOOT SEQUENCE        ║
-║          Managed Swarm Architecture Active             ║
-╚══════════════════════════════════════════════════════╝${RESET}
-    `);
-}
-
-// ────────── CONFIG / ENV VALIDATION ──────────
-const envPath = join(ROOT, ".env");
-if (!existsSync(envPath)) {
-    log("FATAL", RED, "No .env file found. Please copy .env.example to .env and configure your API keys.");
-    process.exit(1);
-}
-
-const envSchema = z.object({
-    CLOUDFLARE_ACCOUNT_ID_1: z.string().min(1, "Cloudflare Account ID is required for inference"),
-    CLOUDFLARE_API_TOKEN_1: z.string().min(1, "Cloudflare API Token is required for inference"),
-    GEMINI_API_KEY: z.string().min(1, "Gemini API Key is required for multimodal vision"),
-    GROQ_API_KEY: z.string().min(1, "Groq API Key is required for TTS/STT processing"),
-    VITE_WS_URL: z.string().optional()
-});
-
-const envParsed = envSchema.safeParse(Bun.env);
-if (!envParsed.success) {
-    log("FATAL", RED, "Environment configuration is invalid or missing keys:");
-    for (const error of envParsed.error.issues) {
-        console.log(`  ${YELLOW}→ ${BOLD}${error.path.join(".")}${RESET}: ${error.message}`);
+async function cleanupStalePorts() {
+    const ports = [18790, 18791];
+    for (const port of ports) {
+        try {
+            const proc = spawn({
+                cmd: ["lsof", "-ti", `:${port}`],
+                stdout: "pipe",
+                stderr: "pipe",
+            });
+            const output = await new Response(proc.stdout).text();
+            const pids = output.trim().split('\n').filter(Boolean);
+            if (pids.length > 0) {
+                NexusCLI.log(`Killing stale process(es) on port ${port}: PIDs ${pids.join(', ')}`, "WARN");
+                for (const pid of pids) {
+                    try {
+                        process.kill(Number(pid), 'SIGTERM');
+                    } catch { }
+                }
+                // Brief wait for ports to release
+                await new Promise(r => setTimeout(r, 500));
+            }
+        } catch {
+            // No process on port — expected case
+        }
     }
-    process.exit(1);
 }
+
+// ────────── BOOT LOGIC ──────────
 
 async function bootBrain() {
-    log("BRAIN", CYAN, "Starting Neural Core (ws://0.0.0.0:18790)...");
+    NexusCLI.log("Starting Neural Core (ws://0.0.0.0:18790)...", "INFO");
     const proc = spawn({
         cmd: ["bun", "run", join(ROOT, "src/core/brain.ts")],
         stdout: "inherit",
         stderr: "inherit",
-        env: {
-            ...Bun.env,
-        },
+        env: { ...Bun.env },
     });
     return proc;
 }
 
 async function bootDashboard() {
-    log("DASH", GREEN, "Booting Dashboard (http://localhost:5173)...");
+    NexusCLI.log("Booting Dashboard (http://localhost:5173)...", "INFO");
     const proc = spawn({
         cmd: ["npm", "run", "dev"],
         cwd: DASHBOARD_DIR,
         stdout: "inherit",
         stderr: "inherit",
-        env: {
-            ...Bun.env,
-        },
+        env: { ...Bun.env },
     });
     return proc;
 }
 
-function setupSignalHandlers(procs: Awaited<ReturnType<typeof bootBrain>>[]) {
+async function bootVoiceAgent() {
+    NexusCLI.log("Starting Stark Voice Agent (LiveKit)...", "INFO");
+    const proc = spawn({
+        cmd: ["python3", "src/core/voice_agent.py", "dev"],
+        cwd: ROOT,
+        stdout: "inherit",
+        stderr: "inherit",
+        env: { ...Bun.env },
+    });
+    return proc;
+}
+
+function setupSignalHandlers(procs: any[]) {
     const shutdown = () => {
-        log("NEXUS", YELLOW, "Shutting down all services...");
+        NexusCLI.log("Shutting down all services...", "WARN");
         tunnelManager.stop();
         for (const p of procs) {
             try { p.kill(); } catch (_) { }
@@ -105,59 +104,107 @@ function setupSignalHandlers(procs: Awaited<ReturnType<typeof bootBrain>>[]) {
     process.on("SIGTERM", shutdown);
 }
 
-// ────────── MAIN ──────────
-banner();
+import { inference } from "./src/core/inference";
 
-log("NEXUS", CYAN, "Initializing Sentinel Swarm Boot Sequence...");
-log("NEXUS", CYAN, `Project Root: ${ROOT}`);
-console.log();
+// ────────── CLI COMMANDS ──────────
+
+const args = process.argv.slice(2);
+
+if (args.includes("--stats")) {
+    NexusCLI.showBanner();
+    const stats = inference.getRotationStats();
+    NexusCLI.showSection("Inference Statistics");
+    console.log(`     ○ Total Calls....... ${stats.totalCalls}`);
+    console.log(`     ○ Rate Limits....... ${stats.rateLimitHits}`);
+    console.log(`     ○ Key Rotations..... ${stats.rotations}`);
+    console.log(`     ○ Last Active....... Account ${stats.lastSuccessfulAccount + 1}`);
+
+    NexusCLI.showSection("Account Usage");
+    Object.entries(stats.accountUsage).forEach(([acc, count]) => {
+        console.log(`     ○ ${acc.replace('_', ' ').toUpperCase()}...... ${count} calls`);
+    });
+
+    if (stats.errors.length > 0) {
+        NexusCLI.showSection("Recent Errors");
+        stats.errors.slice(-5).forEach(err => {
+            console.log(`     [${new Date(err.timestamp).toLocaleTimeString()}] (Acc ${err.account}) ${err.error.substring(0, 60)}...`);
+        });
+    }
+    process.exit(0);
+}
+
+if (args.includes("--doctor")) {
+    NexusCLI.showBanner();
+    await onboardManager.runDiagnostics();
+    process.exit(0);
+}
+
+// ────────── MAIN BOOT SEQUENCE ──────────
+NexusCLI.showBanner();
+
+// Run Professional Onboarding
+const ready = await onboardManager.runDiagnostics();
+
+if (!ready) {
+    NexusCLI.log("System diagnostics failed. Forcing manual verification...", "WARN");
+    // We let it continue but warn the user
+}
+
+NexusCLI.showSection("Booting Services");
+
+// Kill any stale processes from previous runs
+await cleanupStalePorts();
 
 // Boot all services in parallel
-let brainProc: ReturnType<typeof spawn>;
-let dashProc: ReturnType<typeof spawn>;
+let brainProc: any;
+let dashProc: any;
+let voiceProc: any;
 
-[brainProc, dashProc] = await Promise.all([
+[brainProc, dashProc, voiceProc] = await Promise.all([
     bootBrain(),
     bootDashboard(),
+    bootVoiceAgent(),
 ]);
 
-setupSignalHandlers([brainProc, dashProc]);
+setupSignalHandlers([brainProc, dashProc, voiceProc]);
 
 // Wait a bit for services to bind ports
-await Bun.sleep(3000);
+await Bun.sleep(5000);
 
 // Attempt Cloudflare Tunnel
 const tunnelUrl = await tunnelManager.start(18790);
-const tunnelLine = tunnelUrl
-    ? `║  Tunnel URL  →  ${tunnelUrl.padEnd(37)}║`
-    : `║  Tunnel      →  DISABLED (install cloudflared) ║`;
 
-console.log(`
-${GREEN}${BOLD}╔══════════════════════════════════════════════════════╗
-║                  NEXUS IS ALIVE                       ║
-╠══════════════════════════════════════════════════════╣
-║  Dashboard   →  http://localhost:5173                 ║
-║  Neural Core →  ws://localhost:18790                  ║
-${tunnelLine}
-╠══════════════════════════════════════════════════════╣
-║  Press Ctrl+C to shutdown all services                ║
-╚══════════════════════════════════════════════════════╝${RESET}
-`);
+NexusCLI.showSection("System Links");
+NexusCLI.showStatus("Dashboard", "http://localhost:5173", "#00F0FF");
+NexusCLI.showStatus("Neural Core", "ws://localhost:18790", "#00F0FF");
+if (tunnelUrl) {
+    NexusCLI.showStatus("Bridge Link", tunnelUrl, "#00F0FF");
+} else {
+    NexusCLI.showStatus("Bridge Link", "OFFLINE", "#FF3366");
+}
 
+const RESET = "\x1b[0m";
 
 // Keep the process alive watching for child exits
 setInterval(async () => {
     if (brainProc.exitCode !== null) {
-        log("BRAIN", RED, `Neural Core exited unexpectedly (code ${brainProc.exitCode}). Restarting in 2s...`);
+        NexusCLI.log(`Neural Core exited unexpectedly (code ${brainProc.exitCode}). Restarting in 2s...`, "ERROR");
         await Bun.sleep(2000);
         brainProc = await bootBrain();
         setupSignalHandlers([brainProc, dashProc]);
     }
 
     if (dashProc.exitCode !== null) {
-        log("DASH", RED, `Dashboard exited unexpectedly (code ${dashProc.exitCode}). Restarting in 2s...`);
+        NexusCLI.log(`Dashboard exited unexpectedly (code ${dashProc.exitCode}). Restarting in 2s...`, "ERROR");
         await Bun.sleep(2000);
         dashProc = await bootDashboard();
-        setupSignalHandlers([brainProc, dashProc]);
+        setupSignalHandlers([brainProc, dashProc, voiceProc]);
+    }
+
+    if (voiceProc.exitCode !== null) {
+        NexusCLI.log(`Stark Voice Agent exited unexpectedly (code ${voiceProc.exitCode}). Restarting in 2s...`, "ERROR");
+        await Bun.sleep(2000);
+        voiceProc = await bootVoiceAgent();
+        setupSignalHandlers([brainProc, dashProc, voiceProc]);
     }
 }, 5000);

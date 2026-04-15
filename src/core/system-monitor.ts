@@ -7,6 +7,7 @@ export interface SystemTelemetry {
     memUsed: number;   // MB
     memTotal: number;  // MB
     memPct: number;    // %
+    gpuName: string;   // e.g. "Apple M2 Max"
     activeApp: string;
     uptime: string;
     timestamp: string;
@@ -37,11 +38,22 @@ export function getSystemTelemetry(): SystemTelemetry {
     const mins = uptimeMins % 60;
     const uptimeStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
 
+    let gpuName = "Generic GPU";
+    try {
+        if (process.platform === 'darwin') {
+            const res = spawnSync(["system_profiler", "SPDisplaysDataType"]);
+            const output = res.stdout.toString();
+            const match = output.match(/Chipset Model: (.*)/);
+            if (match && match[1]) gpuName = match[1].trim();
+        }
+    } catch { }
+
     return {
         cpu: getCpuUsage(),
         memUsed: usedMb,
         memTotal: totalMb,
         memPct,
+        gpuName,
         activeApp: getActiveApp(),
         uptime: uptimeStr,
         timestamp: new Date().toLocaleTimeString()

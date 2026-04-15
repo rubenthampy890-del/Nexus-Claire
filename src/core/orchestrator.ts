@@ -25,6 +25,7 @@ export type Agent = {
 export class AgentInstance {
     public readonly agent: Agent;
     private messageHistory: Message[];
+    private pinnedContext: Map<string, string>;
 
     constructor(
         role: RoleDefinition,
@@ -39,7 +40,7 @@ export class AgentInstance {
             allowed_tools: role.tools,
             denied_tools: [],
             max_token_budget: 100000,
-            can_spawn_children: role.sub_roles.length > 0,
+            can_spawn_children: (role.sub_roles?.length || 0) > 0,
         };
 
         const authority: AuthorityBounds = {
@@ -60,6 +61,7 @@ export class AgentInstance {
         };
 
         this.messageHistory = [];
+        this.pinnedContext = new Map();
     }
 
     get id(): string { return this.agent.id; }
@@ -68,24 +70,48 @@ export class AgentInstance {
     setTask(task: string): void { this.agent.current_task = task; }
     clearTask(): void { this.agent.current_task = null; }
 
+    pinContext(key: string, content: string): void {
+        this.pinnedContext.set(key, content);
+    }
+
+    unpinContext(key: string): void {
+        this.pinnedContext.delete(key);
+    }
+
     addMessage(role: 'user' | 'assistant' | 'system', content: string): void {
         this.messageHistory.push({ role, content });
     }
 
     getMessages(): Message[] {
-        if (this.messageHistory.length <= 15) return [...this.messageHistory];
+        let systemMessage = this.messageHistory.find(m => m.role === 'system');
 
-        // Preservation strategy: Keep the first message (usually system prompt)
-        // and the most recent context (last 12 messages).
-        const systemMessage = this.messageHistory.find(m => m.role === 'system');
+        // Inject pinned context into system message if it exists, or create one
+        if (this.pinnedContext.size > 0) {
+            let pinnedStr = "\n\n--- PINNED CONTEXT ---\n";
+            for (const [key, val] of this.pinnedContext.entries()) {
+                pinnedStr += `[${key}]:\n${val}\n\n`;
+            }
+            pinnedStr += "--- END PINNED CONTEXT ---\n";
+
+            if (systemMessage) {
+                // Return a copy with injected context
+                systemMessage = { ...systemMessage, content: systemMessage.content + pinnedStr };
+            } else {
+                systemMessage = { role: 'system', content: pinnedStr };
+            }
+        }
+
+        if (this.messageHistory.length <= 15 && this.pinnedContext.size === 0)
+            return [...this.messageHistory];
+
         const recentHistory = this.messageHistory.slice(-12);
-
         const pruned: Message[] = [];
+
         if (systemMessage) pruned.push(systemMessage);
 
-        // Avoid duplicating if system message was in the last 12
         for (const msg of recentHistory) {
-            if (msg !== systemMessage) pruned.push(msg);
+            // Skip the original system message as we've already pushed the (potentially augmented) one
+            if (msg.role !== 'system') pruned.push(msg);
         }
 
         return pruned;
@@ -95,11 +121,30 @@ export class AgentInstance {
         this.agent.status = 'terminated';
         this.clearTask();
     }
+
+    /**
+     * Serialize agent state for checkpointing.
+     */
+    getCheckpointState(): { messages: Message[]; contextPins: [string, string][] } {
+        return {
+            messages: [...this.messageHistory],
+            contextPins: Array.from(this.pinnedContext.entries())
+        };
+    }
+
+    /**
+     * Restore agent state from a checkpoint.
+     */
+    restoreCheckpoint(state: { messages: Message[]; contextPins: [string, string][] }): void {
+        this.messageHistory = state.messages || [];
+        this.pinnedContext = new Map(state.contextPins || []);
+    }
 }
 
 export type Message = {
     role: 'user' | 'assistant' | 'system';
     content: string;
+    image?: { data: string; mimeType: string };
 };
 
 export class NexusOrchestrator {
@@ -137,6 +182,75 @@ export class NexusOrchestrator {
 
         agent.terminate();
         console.log(`[ORCHESTRATOR] Terminated agent ${id}`);
+    }
+
+    /**
+     * Get all active agents as a flat list for dashboard telemetry.
+     */
+    public getAllAgents(): Array<{
+        id: string; name: string; role: string;
+        status: string; authority: number; parentId: string | null;
+    }> {
+        return Array.from(this.agents.values()).map(a => ({
+            id: a.agent.id,
+            name: a.agent.role.name,
+            role: a.agent.role.description?.substring(0, 60) || a.agent.role.name,
+            status: a.agent.status.toUpperCase(),
+            authority: a.agent.authority.max_authority_level,
+            parentId: a.agent.parent_id
+        }));
+    }
+
+    /**
+     * Build a recursive hierarchy tree for the SwarmView dashboard.
+     */
+    public getHierarchy(): any {
+        const agents = this.getAllAgents();
+        if (agents.length === 0) {
+            // Return a default "Nexus Prime" root node
+            return {
+                id: 'nexus-prime',
+                name: 'Nexus Prime',
+                role: 'Orchestrator',
+                status: 'ACTIVE',
+                authority: 10,
+                parent_id: null,
+                children: []
+            };
+        }
+
+        // Find root agents (no parent)
+        const roots = agents.filter(a => !a.parentId);
+        const childMap = new Map<string, typeof agents>();
+        for (const agent of agents) {
+            if (agent.parentId) {
+                if (!childMap.has(agent.parentId)) childMap.set(agent.parentId, []);
+                childMap.get(agent.parentId)!.push(agent);
+            }
+        }
+
+        const buildTree = (agent: typeof agents[0]): any => ({
+            id: agent.id,
+            name: agent.name,
+            role: agent.role,
+            status: agent.status,
+            authority: agent.authority,
+            parent_id: agent.parentId,
+            children: (childMap.get(agent.id) || []).map(buildTree)
+        });
+
+        if (roots.length === 1 && roots[0]) return buildTree(roots[0]);
+
+        // Multiple roots: wrap in a virtual Nexus Prime
+        return {
+            id: 'nexus-prime',
+            name: 'Nexus Prime',
+            role: 'Orchestrator',
+            status: 'ACTIVE',
+            authority: 10,
+            parent_id: null,
+            children: roots.map(buildTree)
+        };
     }
 }
 

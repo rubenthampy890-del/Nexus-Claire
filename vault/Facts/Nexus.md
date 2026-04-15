@@ -1,5 +1,6 @@
 # Facts about Nexus
 
+- Is being enabled to perform social media automation and login via secure scripts. (Relevance: 1)
 - cannot directly access or open websites (Relevance: 1)
 - primary function is to provide information and assist with text-based tasks (Relevance: 1)
 - Requires more context to assist with opening something (Relevance: 1)
@@ -13,4 +14,4 @@
 - Can interact with Ruben through text-based format (Relevance: 1)
 
 --- 
-Updated: 2026-04-08T05:36:47.254Z
+Updated: 2026-04-08T06:16:48.491Z

@@ -6,7 +6,7 @@
  * + direct URL content extraction via fetch.
  */
 
-import { toolRegistry, type ToolDefinition } from "../registry";
+import { toolRegistry, type ToolDefinition } from "../tool-registry";
 
 interface SearchResult {
     title: string;

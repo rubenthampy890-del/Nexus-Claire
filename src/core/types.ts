@@ -33,4 +33,5 @@ export type RoleDefinition = {
     sub_roles: SubRoleTemplate[];
     tools: string[];
     authority_level: number;  // 1-10
+    max_token_budget?: number; // Optional: total tokens before auto-halt
 };

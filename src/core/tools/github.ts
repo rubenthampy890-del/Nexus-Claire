@@ -4,7 +4,7 @@
  * Uses the GitHub REST API directly (no external dependencies).
  */
 
-import { toolRegistry, type ToolDefinition } from "../registry";
+import { toolRegistry, type ToolDefinition } from "../tool-registry";
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || "";
 const GITHUB_API = "https://api.github.com";

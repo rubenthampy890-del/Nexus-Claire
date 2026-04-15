@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
 import { Copy, Check } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 interface ChatBubbleProps {
     role: string;
     text: string;
     variant?: 'terminal' | 'dashboard';
+    isStreaming?: boolean;
+    imageBase64?: string;
 }
 
 /**
@@ -12,21 +15,33 @@ interface ChatBubbleProps {
  * - Markdown-like code block detection (```...```)
  * - One-click clipboard copy for code blocks
  * - Inline code highlighting (`...`)
+ * - Streaming cursor indicator
  * - Stable rendering to prevent ghost text
  */
-export const ChatBubble: React.FC<ChatBubbleProps> = ({ role, text, variant = 'terminal' }) => {
+export const ChatBubble: React.FC<ChatBubbleProps> = ({ role, text, variant = 'terminal', isStreaming, imageBase64 }) => {
     return (
         <div className={`flex flex-col max-w-[90%] ${role === 'USER' ? 'self-end items-end' : 'self-start items-start'}`}>
             <span className={`text-[10px] uppercase tracking-wider mb-1 font-semibold ${role === 'USER' ? 'text-[var(--color-text-tertiary)]' : variant === 'dashboard' ? 'text-[var(--color-brand-primary)]' : 'text-[#818cf8]'}`}>
                 {role === 'USER' ? 'Operator' : 'Nexus'}
             </span>
-            <div className={`p-4 text-sm leading-relaxed rounded-xl ${role === 'USER'
+            <div className={`p-4 text-sm leading-relaxed rounded-xl relative ${role === 'USER'
                 ? 'bg-[#1f1f2e] border border-[var(--color-border-subtle)] rounded-tr-none text-[#f8fafc]'
                 : variant === 'dashboard'
                     ? 'bg-[var(--color-brand-primary)]/10 border border-[var(--color-brand-primary)]/20 rounded-tl-none text-[#f8fafc]'
                     : 'bg-[#1e1b4b] border border-[#3730a3] rounded-tl-sm text-gray-100'
                 }`}>
+                {imageBase64 && (
+                    <img src={`data:image/png;base64,${imageBase64}`} alt="Shared" className="max-h-48 rounded-lg mb-3 border border-white/10 object-contain" />
+                )}
                 <RichText text={text} />
+                {isStreaming && (
+                    <motion.span
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ repeat: Infinity, duration: 0.8, ease: "easeInOut" }}
+                        className="inline-block w-2 h-4 bg-[var(--color-brand-primary)] ml-1 align-middle"
+                    />
+                )}
             </div>
         </div>
     );

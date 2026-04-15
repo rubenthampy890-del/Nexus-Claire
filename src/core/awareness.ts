@@ -16,7 +16,9 @@ export class NexusAwarenessService {
     private events: AwarenessEvent[] = [];
     private lastBuffer: Buffer | null = null;
     private interval: Timer | null = null;
+    private lastProactiveTask = 0;
     private isAnalysing = false;
+    private PROACTIVE_COOLDOWN = 10 * 60 * 1000; // 10 minutes
 
     constructor() { }
 
@@ -24,10 +26,10 @@ export class NexusAwarenessService {
      * Start the Perception Loop (The Heartbeat).
      * Captures the screen at intervals and checks for "struggles".
      */
-    public start(intervalMs: number = 10000): void {
+    public start(intervalMs: number = 120000): void { // Default to 2 minutes
         if (this.interval) clearInterval(this.interval);
 
-        console.log(`[AWARENESS] Starting perception loop (${intervalMs}ms)...`);
+        console.log(`[AWARENESS] Starting throttled perception loop (${intervalMs}ms)...`);
         this.interval = setInterval(() => this.perceive(), intervalMs);
     }
 
@@ -46,6 +48,7 @@ export class NexusAwarenessService {
         this.isAnalysing = true;
 
         try {
+            console.log("[AWARENESS] Perceiving screen state...");
             const buffer = await sidecar.captureScreen();
             if (!buffer) {
                 this.isAnalysing = false;
@@ -54,7 +57,7 @@ export class NexusAwarenessService {
 
             // 1. Pixel-Diff check
             const changePct = this.computePixelDiff(buffer);
-            if (changePct < 0.02 && this.lastBuffer !== null) {
+            if (changePct < 0.05 && this.lastBuffer !== null) { // Increased threshold to 5%
                 // No significant change, skip analysis
                 this.isAnalysing = false;
                 return;
@@ -65,25 +68,29 @@ export class NexusAwarenessService {
 
             // 2. OCR Extraction
             const text = await this.performOCR(buffer);
+            if (!text || text.trim().length < 5) {
+                this.isAnalysing = false;
+                return;
+            }
 
             // 3. Struggle Detection (Keywords)
             const lowerText = text.toLowerCase();
-            const errors = ["error", "exception", "failed", "crash", "bug", "timeout", "rejected"];
+            const errors = ["error", "exception", "failed", "crash", "bug", "timeout", "rejected", "system failure"];
             const foundErrors = errors.filter(e => lowerText.includes(e));
 
             if (foundErrors.length > 0) {
                 this.reportEvent({
                     type: 'struggle',
-                    source: window.app,
-                    message: `Detected screen errors: ${foundErrors.join(", ")} | Window: ${window.title}`,
+                    source: window.app || 'Unknown App',
+                    message: `Detected screen errors: ${foundErrors.join(", ")} | Window: ${window.title || 'Unknown'}`,
                     timestamp: Date.now(),
                     metadata: { ocr: text, window }
                 });
             } else {
                 this.reportEvent({
                     type: 'capture',
-                    source: window.app,
-                    message: `Captured state: ${window.title}`,
+                    source: window.app || 'Background',
+                    message: `Captured state: ${window.title || 'Idle'}`,
                     timestamp: Date.now()
                 });
             }
@@ -96,20 +103,25 @@ export class NexusAwarenessService {
     }
 
     private async performOCR(buffer: Buffer): Promise<string> {
-        const worker = await createWorker('eng');
-        const ret = await worker.recognize(buffer);
-        await worker.terminate();
-        return ret.data.text;
+        try {
+            const worker = await createWorker('eng');
+            const ret = await worker.recognize(buffer);
+            await worker.terminate();
+            return ret.data.text;
+        } catch (e) {
+            console.error("[AWARENESS] OCR Failed:", e);
+            return "";
+        }
     }
 
     /**
      * Sample pixels to detect screen changes efficiently.
      */
-    private computePixelDiff(current: Buffer): float64 {
+    private computePixelDiff(current: Buffer): number {
         if (!this.lastBuffer) return 1.0;
         if (current.length !== this.lastBuffer.length) return 1.0;
 
-        const step = 100; // Sample every 100th byte for speed
+        const step = 200; // Increased step for faster sampling
         let changed = 0;
         let total = 0;
 
@@ -133,14 +145,24 @@ export class NexusAwarenessService {
     }
 
     private handleStruggle(event: AwarenessEvent): void {
-        // Debounce: don't trigger if we already have an active engineer for this source
-        const activeTasks = taskManager.getTasks().filter(t => t.status === 'active');
-        if (activeTasks.some(t => t.task.includes(event.source))) return;
+        const now = Date.now();
+        if (now - this.lastProactiveTask < this.PROACTIVE_COOLDOWN) {
+            console.log("[AWARENESS] Skipping proactive fix: Cooldown active.");
+            return;
+        }
 
-        console.log(`[AWARENESS] !!! STRUGGLE TRIGGERED !!! Automating fix for ${event.source}...`);
+        // Debounce: don't trigger if we already have an active engineer for this source
+        const activeTasks = taskManager.listTasks().filter(t => t.status === 'running');
+        if (activeTasks.some(t => t.task.includes(event.source))) {
+            console.log(`[AWARENESS] Already fixing ${event.source}, skipping.`);
+            return;
+        }
+
+        console.log(`[AWARENESS] !!! STRUGGLE DETECTED — Launchingfix for ${event.source}...`);
+        this.lastProactiveTask = now;
 
         const engineerRole: RoleDefinition = {
-            id: 'nexus-engineer-proactive',
+            id: 'nexus-sentinel-proactive',
             name: 'Nexus Sentinel (Proactive)',
             description: 'A proactive engineering role that researches and fixes screen errors autonomously.',
             responsibilities: ['Autonomous debugging', 'Screen-based error resolution'],
@@ -148,7 +170,7 @@ export class NexusAwarenessService {
             approval_required: [],
             kpis: [],
             communication_style: { tone: 'technical', verbosity: 'concise', formality: 'casual' },
-            heartbeat_instructions: 'Analyze the OCR data and fix the error visible on the user screen.',
+            heartbeat_instructions: 'You are helping the user maintain system stability. Analyze the OCR data and fix the error visible on the user screen.',
             sub_roles: [],
             tools: ['terminal.run', 'fs.read', 'fs.write', 'browser.search'],
             authority_level: 9
@@ -161,7 +183,7 @@ export class NexusAwarenessService {
             task: `A struggle was detected on screen in ${event.source}. 
             OCR Data: ${event.metadata?.ocr?.slice(0, 500)}
             Window: ${event.metadata?.window?.title}
-            Analyze the situation and resolve the issue. If it's a code error, fix it in the workspace.`,
+            Directively stabilize the system. Solve the root cause of these errors.`,
             context: `Last Events: ${JSON.stringify(this.events.slice(-3))}`,
             onComplete: (task) => {
                 orchestrator.terminateAgent(agent.id);
@@ -170,8 +192,9 @@ export class NexusAwarenessService {
     }
 
     public getHistory(): AwarenessEvent[] {
-        return [...this.events];
+        return [...this.events].slice(-20); // Return only last 20 events
     }
 }
 
 export const awareness = new NexusAwarenessService();
+

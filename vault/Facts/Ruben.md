@@ -1,5 +1,9 @@
 # Facts about Ruben
 
+- Provided credentials (account name: reu.bennn_, password: Ruben@890) for Instagram login. (Relevance: 1)
+- Is providing an Instagram account ID to initiate a login sequence. (Relevance: 1)
+- Wants Nexus to have the capability to log into his social media accounts if credentials are provided. (Relevance: 1)
+- Expressed interest in automating control of his Instagram account. (Relevance: 1)
 - Likes obsidian-style memory management. (Relevance: 1)
 - Loves building autonomous agents (Relevance: 0.7)
 - Likes obsidian-style memory management. (Relevance: 1)
@@ -19,4 +23,4 @@
 - Interacts with Nexus (Relevance: 1)
 
 --- 
-Updated: 2026-04-08T05:36:47.252Z
+Updated: 2026-04-08T06:16:48.490Z

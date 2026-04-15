@@ -21,6 +21,12 @@ export class NeuralLink {
         try {
             console.log("[NEURAL LINK] Establishing secure WebSocket to Gemini Live...");
 
+            // Check if the live API is available in this SDK version
+            if (!this.client.live || typeof this.client.live.connect !== 'function') {
+                console.warn("[NEURAL LINK] Live API not available in current @google/genai SDK. Skipping.");
+                return;
+            }
+
             this.session = await this.client.live.connect({
                 model: 'gemini-2.0-flash-exp',
                 config: {
@@ -37,8 +43,8 @@ export class NeuralLink {
                 }
             });
 
-        } catch (error) {
-            console.error("[NEURAL LINK] Failed to initialize connection:", error);
+        } catch (error: any) {
+            console.warn(`[NEURAL LINK] Failed to initialize (non-critical): ${error?.message || error}`);
         }
     }
 

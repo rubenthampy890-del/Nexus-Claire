@@ -1,7 +1,7 @@
 import React from 'react';
-import { Terminal, Database, Target, Activity, Zap, Command, Shield } from 'lucide-react';
+import { Terminal, Database, Target, Activity, Zap, Command, Shield, Monitor } from 'lucide-react';
 
-export type ViewType = 'TERMINAL' | 'VAULT' | 'DIRECTIVES' | 'ANALYTICS' | 'ORB' | 'SWARM' | 'SANDBOX';
+export type ViewType = 'TERMINAL' | 'VAULT' | 'DIRECTIVES' | 'ANALYTICS' | 'ORB' | 'SWARM' | 'SANDBOX' | 'BROWSER' | 'SKILLS';
 
 interface SidebarProps {
     currentView: ViewType;
@@ -18,7 +18,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onViewChange, bri
         { id: 'TERMINAL', icon: Terminal, label: 'Terminal' },
         { id: 'SWARM', icon: Command, label: 'Swarm' }, // Reusing Command or adding Layers
         { id: 'VAULT', icon: Database, label: 'Vault' },
+        { id: 'BROWSER', icon: Monitor, label: 'Browser' },
         { id: 'DIRECTIVES', icon: Target, label: 'Directives' },
+        { id: 'SKILLS', icon: Zap, label: 'Autonomous Skills' },
         { id: 'ANALYTICS', icon: Activity, label: 'Analytics' },
         { id: 'SANDBOX', icon: Shield, label: 'Sandbox' },
     ];

@@ -55,6 +55,8 @@ export interface ToolDefinition {
     createdAt?: number;
     lastUsedAt?: number;
     useCount?: number;
+    failureCount?: number;
+    lastFailureHint?: string;
 }
 
 export type ToolExecutionContext = {
@@ -90,6 +92,8 @@ export type ToolExecutionEvent = {
 };
 
 export type ToolEventListener = (event: ToolExecutionEvent) => void;
+export type ToolRegistrationListener = (tool: ToolDefinition) => void;
+export type ApprovalRequestListener = (approvalId: string, toolName: string, reason: string) => void;
 
 /* ─── Registry ─── */
 
@@ -98,6 +102,8 @@ export class NexusToolRegistry {
     private coreToolNames = new Set<string>();  // Protected: cannot be overwritten
     private beforeHooks: BeforeToolCallHook[] = [];
     private eventListeners: ToolEventListener[] = [];
+    private registrationListeners: ToolRegistrationListener[] = [];
+    private approvalListeners: ApprovalRequestListener[] = [];
     private pendingApprovals = new Map<string, { resolve: (approved: boolean) => void; toolName: string; reason: string }>();
     private learnedToolsDir: string;
 
@@ -125,6 +131,7 @@ export class NexusToolRegistry {
         tool.riskLevel = tool.riskLevel || this.classifyRisk(tool);
         tool.timeout = tool.timeout || 30000;
         tool.useCount = tool.useCount || 0;
+        tool.failureCount = tool.failureCount || 0;
         tool.createdAt = tool.createdAt || Date.now();
 
         this.tools.set(tool.name, tool);
@@ -135,6 +142,12 @@ export class NexusToolRegistry {
         }
 
         console.log(`[TOOL REGISTRY] ✅ Registered: ${tool.name} [${provenance}] (${tool.category}) risk=${tool.riskLevel}`);
+
+        // Notify listeners
+        this.registrationListeners.forEach(listener => {
+            try { listener(tool); } catch { }
+        });
+
         return true;
     }
 
@@ -237,7 +250,19 @@ export class NexusToolRegistry {
             tool.lastUsedAt = Date.now();
         } catch (err: any) {
             success = false;
-            result = `Error executing tool '${name}': ${err.message}`;
+            tool.failureCount = (tool.failureCount || 0) + 1;
+
+            // Generate Correction Hint based on tool parameters
+            const paramHints = Object.entries(tool.parameters)
+                .map(([p, spec]) => `- ${p}: ${spec.description} (${spec.type}${spec.enum ? `, enum: [${spec.enum.join(', ')}]` : ''})`)
+                .join('\n');
+
+            const hint = `Ensure you provide exactly these parameters:\n${paramHints}`;
+            tool.lastFailureHint = hint;
+
+            result = `[TOOL_FAILURE] Error executing '${name}': ${err.message}\n` +
+                `CORRECTION_HINT: ${hint}`;
+
             console.error(`[TOOL REGISTRY] ${name} failed:`, err.message);
         }
 
@@ -280,6 +305,11 @@ export class NexusToolRegistry {
         this.eventListeners.push(listener);
     }
 
+    /** Register a listener for tool registration events */
+    public onToolRegistered(listener: ToolRegistrationListener): void {
+        this.registrationListeners.push(listener);
+    }
+
     private emitEvent(event: ToolExecutionEvent): void {
         for (const listener of this.eventListeners) {
             try { listener(event); } catch { }
@@ -288,12 +318,21 @@ export class NexusToolRegistry {
 
     /* ─── Approval System ─── */
 
+    public onApprovalRequested(listener: ApprovalRequestListener) {
+        this.approvalListeners.push(listener);
+    }
+
     private async waitForApproval(toolName: string, reason: string, approvalId?: string): Promise<boolean> {
         const id = approvalId || `approval-${Date.now()}-${toolName}`;
 
         // Auto-approve after 60 seconds if no response (configurable)
         return new Promise<boolean>((resolve) => {
             this.pendingApprovals.set(id, { resolve, toolName, reason });
+
+            // Notify UI
+            this.approvalListeners.forEach(listener => {
+                try { listener(id, toolName, reason); } catch { }
+            });
 
             // Timeout: auto-deny after 120s
             setTimeout(() => {
@@ -310,13 +349,24 @@ export class NexusToolRegistry {
      * Approve or deny a pending tool execution.
      * Called from Telegram bot, Dashboard, etc.
      */
-    public resolveApproval(approvalId: string, approved: boolean): boolean {
+    public resolveApproval(approvalId: string, approved: boolean, options?: { trustPattern?: string; trustSession?: boolean }): boolean {
         const pending = this.pendingApprovals.get(approvalId);
         if (!pending) return false;
 
+        // Apply trust options via Critic if approved
+        if (approved && options) {
+            const { nexusCritic } = require("./critic");
+            if (options.trustPattern) {
+                nexusCritic.addTrustedPattern(options.trustPattern);
+            }
+            if (options.trustSession) {
+                nexusCritic.enableSessionTrust();
+            }
+        }
+
         pending.resolve(approved);
         this.pendingApprovals.delete(approvalId);
-        console.log(`[TOOL REGISTRY] ${approved ? '✅' : '❌'} Approval ${approvalId}: ${approved ? 'GRANTED' : 'DENIED'}`);
+        console.log(`[TOOL REGISTRY] ${approved ? '✅' : '❌'} Approval ${approvalId}: ${approved ? 'GRANTED' : 'DENIED'}${options ? ' (Trust applied)' : ''}`);
         return true;
     }
 
@@ -352,6 +402,13 @@ export class NexusToolRegistry {
 
     public getTool(name: string): ToolDefinition | undefined {
         return this.tools.get(name);
+    }
+
+    /**
+     * Get the last correction hint for a failed tool.
+     */
+    public getFailureHint(name: string): string | null {
+        return this.tools.get(name)?.lastFailureHint || null;
     }
 
     public listTools(filter?: { category?: string; provenance?: ToolProvenance; riskLevel?: ToolRiskLevel }): ToolDefinition[] {

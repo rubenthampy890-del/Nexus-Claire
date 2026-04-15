@@ -35,6 +35,8 @@ export class WhatsAppBridge {
     public onMessageReceived?: (text: string) => void;
     public onTaskCreated?: (title: string) => void;
     public onSearchRequested?: (query: string) => void;
+    public onStateChange?: (state: 'QR' | 'READY' | 'DISCONNECTED', data?: any) => void;
+
 
     constructor() {
         if (!whatsappAvailable) {
@@ -60,6 +62,7 @@ export class WhatsAppBridge {
         // QR Code for linking
         this.client.on('qr', (qr: string) => {
             console.log('[WHATSAPP] Scan this QR code to link your WhatsApp:');
+            if (this.onStateChange) this.onStateChange('QR', qr);
             // Try to display QR in terminal
             try {
                 const qrcode = require('qrcode-terminal');
@@ -71,6 +74,7 @@ export class WhatsAppBridge {
 
         this.client.on('ready', () => {
             this._ready = true;
+            if (this.onStateChange) this.onStateChange('READY');
             console.log('[WHATSAPP] Bridge Connected & Ready!');
         });
 
@@ -134,6 +138,7 @@ export class WhatsAppBridge {
 
         this.client.on('disconnected', () => {
             this._ready = false;
+            if (this.onStateChange) this.onStateChange('DISCONNECTED');
             console.log('[WHATSAPP] Disconnected. Will try to reconnect...');
         });
     }

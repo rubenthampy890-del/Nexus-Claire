@@ -28,20 +28,21 @@ export class SidecarBridge {
      * Uses cross-platform screen capture APIs.
      */
     public async captureScreen(): Promise<Buffer | null> {
+        const tempPath = join(tmpdir(), `nexus_capture_${Date.now()}_${Math.random().toString(36).substring(7)}.png`);
         try {
-            await PlatformUtils.captureScreen(this.tempFile);
+            await PlatformUtils.captureScreen(tempPath);
 
-            const file = Bun.file(this.tempFile);
+            const file = Bun.file(tempPath);
             const exists = await file.exists();
             if (!exists) {
-                console.error(`[SidecarBridge] Capture file not found at ${this.tempFile}`);
+                console.error(`[SidecarBridge] Capture file not found at ${tempPath}`);
                 return null;
             }
 
             const buffer = Buffer.from(await file.arrayBuffer());
 
             // Clean up
-            await unlink(this.tempFile).catch(() => { });
+            await unlink(tempPath).catch(() => { });
 
             return buffer;
         } catch (error) {

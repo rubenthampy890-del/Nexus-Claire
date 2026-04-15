@@ -1,1 +1,9 @@
-User requirements content
+livekit-agents
+livekit-plugins-openai
+livekit-plugins-google
+livekit-plugins-silero
+faster-whisper
+edge-tts
+python-dotenv
+httpx
+pydantic

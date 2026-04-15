@@ -1,4 +1,4 @@
-import { toolRegistry, type ToolDefinition } from "../registry";
+import { toolRegistry, type ToolDefinition } from "../tool-registry";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from "node:fs";
@@ -21,7 +21,8 @@ export const builtinTools: ToolDefinition[] = [
                 const { stdout, stderr } = await execAsync(command, { cwd });
                 return `STDOUT:\n${stdout}\n\nSTDERR:\n${stderr}`;
             } catch (err: any) {
-                return `FAILED:\n${err.stdout || ''}\n\nERROR:\n${err.stderr || err.message}`;
+                // Throwing real error to trigger self-healing
+                throw new Error(`Terminal command failed:\nSTDOUT: ${err.stdout || ''}\nSTDERR: ${err.stderr || err.message}`);
             }
         }
     },
@@ -34,7 +35,7 @@ export const builtinTools: ToolDefinition[] = [
         },
         execute: async (params) => {
             const filePath = path.resolve(params.path as string);
-            if (!existsSync(filePath)) return `Error: File not found: ${filePath}`;
+            if (!existsSync(filePath)) throw new Error(`File not found: ${filePath}`);
             return readFileSync(filePath, 'utf-8');
         }
     },
@@ -63,7 +64,7 @@ export const builtinTools: ToolDefinition[] = [
         },
         execute: async (params) => {
             const dirPath = path.resolve(params.path as string);
-            if (!existsSync(dirPath)) return `Error: Directory not found: ${dirPath}`;
+            if (!existsSync(dirPath)) throw new Error(`Directory not found: ${dirPath}`);
             const items = readdirSync(dirPath);
             return items.join('\n');
         }

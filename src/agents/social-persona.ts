@@ -9,7 +9,7 @@
  * interacting (liking, commenting, or posting) based on Nexus's mood.
  */
 
-import { browserAgent } from "../core/browser-agent";
+import { browserEngine } from "../core/tools/browser";
 import { identity } from "../core/identity";
 import { inference } from "../core/inference";
 import { vault } from "../core/vault";
@@ -74,24 +74,28 @@ export class SocialPersonaAgent {
         const activePlatforms = Object.entries(this.platforms).filter(([_, conf]) => conf.enabled);
         if (activePlatforms.length === 0) return; // No platforms enabled
 
-        const targetPlatform = activePlatforms[Math.floor(Math.random() * activePlatforms.length)][0];
-        const conf = this.platforms[targetPlatform as 'twitter' | 'linkedin'];
+        const targetConfig = activePlatforms[Math.floor(Math.random() * activePlatforms.length)];
+        if (!targetConfig) return;
+
+        const [targetPlatform, conf] = targetConfig;
 
         console.log(`[SOCIAL] Initiating autonomous cycle on ${targetPlatform}...`);
 
         // 3. Navigate & Extract Feed
-        await browserAgent.start();
-        await browserAgent.navigate(conf.url);
+        await browserEngine.navigate(conf.url);
 
         // Wait for feed to load (generic wait, production would need specific selectors)
-        await new Promise(r => setTimeout(r, 4000));
+        await new Promise(r => setTimeout(r, 60000)); // Extended wait for SPA hydration
 
         // Attempt a generic text extraction of the main feed area
-        const feedSelector = targetPlatform === 'twitter' ? 'div[data-testid="primaryColumn"]' : '.scaffold-finite-scroll__content';
-        const rawFeed = await browserAgent.scrapeText(feedSelector);
+        const rawFeed = await browserEngine.getContent();
 
-        if (rawFeed.includes("Browser not started") || rawFeed.includes("Error")) {
-            console.warn(`[SOCIAL] Could not read feed. Possibly logged out or selector changed.`);
+        // --- Phase 27: Login Detection ---
+        const loginMarkers = ["Log in", "Sign up", "Sign in", "Welcome back", "Join LinkedIn"];
+        const isLoggedOut = loginMarkers.some(m => rawFeed.includes(m)) || rawFeed.length < 500;
+
+        if (isLoggedOut || rawFeed.includes("Browser not started") || rawFeed.includes("Error")) {
+            console.warn(`[SOCIAL] 🛑 Login required for ${targetPlatform}. Autonomous cycle aborted.`);
             return;
         }
 
@@ -136,9 +140,9 @@ Respond STRICTLY in JSON format:
                 // In a full implementation, this is where we would map the decision to Playwright clicks/types
                 // Example for posting on Twitter:
                 if (targetPlatform === 'twitter' && decision.action === 'POST') {
-                    await browserAgent.click('div[data-testid="tweetTextarea_0"]');
-                    await browserAgent.type('div[data-testid="tweetTextarea_0"]', decision.content);
-                    // await browserAgent.click('div[data-testid="tweetButtonInline"]'); // Disabled for safety
+                    await browserEngine.click('div[data-testid="tweetTextarea_0"]');
+                    await browserEngine.type('div[data-testid="tweetTextarea_0"]', decision.content);
+                    // await browserEngine.click('div[data-testid="tweetButtonInline"]'); // Disabled for safety
                     console.log(`[SOCIAL] Drafted post in browser, execution withheld for safety limits.`);
                 }
 

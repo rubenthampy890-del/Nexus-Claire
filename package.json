@@ -7,16 +7,17 @@
     "start": "bun run nexus.ts",
     "brain": "bun run src/core/brain.ts",
     "dash": "cd dashboard && npm run dev",
-    "satellite": "bun run src/core/satellite.ts",
-    "docker:build": "docker compose build",
-    "docker:up": "docker compose up -d",
-    "docker:down": "docker compose down",
-    "verify": "bun run test-nexus-4-swarms.ts"
+    "nexus": "bun run nexus.ts",
+    "sidecar": "bun run src/core/satellite.ts"
+  },
+  "bin": {
+    "nexus": "./nexus.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/chalk": "2.2.4",
     "@types/js-yaml": "^4.0.9",
+    "@types/node": "^25.5.2",
     "concurrently": "^9.2.1",
     "electron": "^41.1.1",
     "electron-builder": "^26.8.1",
@@ -27,6 +28,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.48.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@playwright/test": "^1.59.1",
     "@supabase/supabase-js": "^2.101.1",
     "axios": "^1.14.0",
@@ -37,6 +39,8 @@
     "js-yaml": "^4.1.1",
     "playwright": "^1.59.1",
     "playwright-core": "^1.59.1",
+    "puppeteer": "^24.40.0",
+    "puppeteer-core": "^24.40.0",
     "sqlite3": "^6.0.1",
     "telegraf": "^4.16.3",
     "tesseract.js": "^7.0.0",

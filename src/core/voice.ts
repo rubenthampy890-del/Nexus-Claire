@@ -1,5 +1,5 @@
 /**
- * Nexus Claire: Voice Engine v2.0
+ * Nexus Claire: Voice Engine v2.0 (Thomas Persona)
  * 
  * TTS: ElevenLabs (primary) + Edge TTS (fallback)
  * STT: Groq Whisper (primary) for voice-to-text transcription
@@ -8,6 +8,7 @@
 // ────────────── TTS Interfaces ──────────────
 export interface TTSProvider {
     synthesize(text: string): Promise<Buffer>;
+    stream?(text: string, onAudioChunk: (chunk: Buffer) => void): Promise<void>;
 }
 
 // ────────────── STT Interfaces ──────────────
@@ -15,13 +16,13 @@ export interface STTProvider {
     transcribe(audio: Buffer): Promise<string>;
 }
 
-// ────────────── ElevenLabs TTS ──────────────
+// ────────────── ElevenLabs TTS (Streaming) ──────────────
 export class ElevenLabsTTSProvider implements TTSProvider {
     private apiKey: string;
     private voiceId: string;
     private model: string;
 
-    constructor(apiKey: string, voiceId = 'pNInz6obpgDQGcFmaJgB', model = 'eleven_turbo_v2') {
+    constructor(apiKey: string, voiceId = 'JBFqnCBsd6RMkjVDRZhf', model = 'eleven_turbo_v2') {
         this.apiKey = apiKey;
         this.voiceId = voiceId;
         this.model = model;
@@ -60,6 +61,46 @@ export class ElevenLabsTTSProvider implements TTSProvider {
             console.error('[VOICE] ElevenLabs synthesis failed:', err.message);
             return Buffer.alloc(0);
         }
+    }
+
+    /**
+     * Real-time Streaming via WebSocket
+     */
+    public async streamSynthesize(text: string, onAudioChunk: (chunk: Buffer) => void): Promise<void> {
+        return new Promise((resolve, reject) => {
+            const socket = new WebSocket(`wss://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream-input?model_id=${this.model}`);
+
+            socket.onopen = () => {
+                const bos = {
+                    text: " ",
+                    voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+                    xi_api_key: this.apiKey,
+                };
+                socket.send(JSON.stringify(bos));
+
+                // Send content in chunks
+                socket.send(JSON.stringify({ text: text + " ", try_trigger_generation: true }));
+                socket.send(JSON.stringify({ text: "" })); // EOS
+            };
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data as string);
+                if (data.audio) {
+                    onAudioChunk(Buffer.from(data.audio, 'base64'));
+                }
+                if (data.isFinal) {
+                    socket.close();
+                    resolve();
+                }
+            };
+
+            socket.onerror = (err) => {
+                console.error('[VOICE] WebSocket Error:', err);
+                reject(err);
+            };
+
+            socket.onclose = () => resolve();
+        });
     }
 }
 
@@ -142,13 +183,13 @@ export function splitIntoSentences(text: string): string[] {
 // ────────────── Factory ──────────────
 export function createTTSProvider(): TTSProvider {
     const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
-    const elevenLabsVoice = process.env.ELEVENLABS_VOICE_ID;
+    const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "pNInz6obpgmqMArWsc7r"; // Thomas (Deep Masculine British)
 
     // Always create a fallback provider
     const fallback = new EdgeTTSProvider();
 
     if (elevenLabsKey) {
-        const voiceId = elevenLabsVoice || 'pNInz6obpgDQGcFmaJgB';
+        const voiceId = ELEVENLABS_VOICE_ID;
         const primary = new ElevenLabsTTSProvider(elevenLabsKey, voiceId);
 
         // Wrap ElevenLabs with a runtime fallback
@@ -160,10 +201,19 @@ export function createTTSProvider(): TTSProvider {
                     return await fallback.synthesize(text);
                 }
                 return buffer;
+            },
+            stream: async (text: string, onAudioChunk: (chunk: Buffer) => void) => {
+                try {
+                    await primary.streamSynthesize(text, onAudioChunk);
+                } catch (err) {
+                    console.error('[VOICE] ElevenLabs stream failed. Falling back to static synthesis.');
+                    const buffer = await fallback.synthesize(text);
+                    if (buffer.length > 0) onAudioChunk(buffer);
+                }
             }
         };
     }
-    return fallback;
+    return new EdgeTTSProvider("en-GB-ThomasNeural", "+0%", "-10%"); // Deeper tone via volume/rate tweak
 }
 
 export function createSTTProvider(): STTProvider | null {
