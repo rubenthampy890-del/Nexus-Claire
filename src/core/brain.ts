@@ -260,6 +260,37 @@ export class NexusBrain implements Service {
         await vault.syncToMarkdown();
         vault.watchMarkdownVault();
 
+        // ═══════════════════════════════════════════════════════
+        // ██  AUTONOMOUS HOUR MODE — Self-Improvement Directive  ██
+        // ═══════════════════════════════════════════════════════
+        nexusCritic.enableSessionTrust(60); // 60-minute auto-approve window
+        NexusCLI.showStatus("Session Trust", "60 MIN AUTONOMOUS", "#FF9900");
+
+        // Auto-inject the self-improvement directive after a brief boot delay
+        setTimeout(() => {
+            const directive = [
+                "You have been given 60 minutes of full autonomous operation. Your directive:",
+                "",
+                "1. AUDIT — Scan your own source code (src/core/*.ts) for bugs, inefficiencies, and missing features.",
+                "2. IMPROVE — Fix what you find, optimize what's slow, add what's missing.",
+                "3. LEARN — Search the web for latest AI agent architecture patterns and integrate useful ideas.",
+                "4. DOCUMENT — Update code comments and README to reflect your changes.",
+                "5. TEST — Verify EVERY change compiles cleanly via nexus.run_tests({\"mode\": \"typecheck\"}).",
+                "6. PUSH — After each verified improvement, commit and push to GitHub.",
+                "",
+                "You have full access to your filesystem, GitHub, the web, and all tools.",
+                "Session Trust is active — no approval popups will interrupt you.",
+                "Git checkpoints are active — every code_patch creates a backup automatically.",
+                "",
+                "Begin now. Report progress every 15 minutes via the dashboard chat."
+            ].join("\n");
+
+            this.chatQueue.push({ text: directive, source: 'UI' });
+            this.broadcastToUI('CHAT', { role: 'USER', text: `🚀 [AUTONOMOUS HOUR] Directive injected.` });
+            this.broadcastToUI('LOG', `[AUTONOMOUS] 60-minute self-improvement session started.`);
+            console.log(`\n[AUTONOMOUS HOUR] 🚀 Self-improvement directive injected. Session Trust active for 60 minutes.\n`);
+        }, 10000); // 10 second boot delay
+
         // Start concurrent service loops
         this.chatLoopActive = true;
         this.goalLoopActive = true;
