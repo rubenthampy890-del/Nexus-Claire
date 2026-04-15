@@ -21,6 +21,27 @@ export class NexusVault {
     private vaultPath: string;
     private isSyncing: boolean = false;
 
+    /* ─── Async File Mutex (Prevents Race Conditions) ─── */
+    private fileLocks: Map<string, Promise<void>> = new Map();
+
+    private async withFileLock(filePath: string, fn: () => void): Promise<void> {
+        // Wait for any existing lock on this file path
+        const existing = this.fileLocks.get(filePath);
+        const task = (existing || Promise.resolve()).then(() => {
+            try {
+                fn();
+            } catch (e: any) {
+                console.warn(`[VAULT] File write failed (${filePath}): ${e.message}`);
+            }
+        });
+        this.fileLocks.set(filePath, task);
+        await task;
+        // Clean up resolved lock
+        if (this.fileLocks.get(filePath) === task) {
+            this.fileLocks.delete(filePath);
+        }
+    }
+
     public setVaultPath(p: string) {
         this.vaultPath = p;
         if (!fs.existsSync(this.vaultPath)) {
@@ -475,6 +496,7 @@ export class NexusVault {
 
     /**
      * Exports all facts to Markdown files in the Obsidian Vault.
+     * Uses file-path mutexes to prevent race conditions from concurrent Satellite writes.
      */
     public async syncToMarkdown() {
         if (this.isSyncing) return;
@@ -487,16 +509,17 @@ export class NexusVault {
 
             // 1. Write Entities to dedicated folder
             const entityDir = path.join(this.vaultPath, "Entities");
-            if (!fs.existsSync(entityDir)) fs.mkdirSync(entityDir);
+            if (!fs.existsSync(entityDir)) fs.mkdirSync(entityDir, { recursive: true });
 
             for (const entity of entities) {
+                const filePath = path.join(entityDir, `${entity.name}.md`);
                 const content = `# ${entity.name}\nType: ${entity.type}\n\n${entity.description}\n\n--- \nLast Active: ${entity.last_seen}`;
-                fs.writeFileSync(path.join(entityDir, `${entity.name}.md`), content);
+                await this.withFileLock(filePath, () => fs.writeFileSync(filePath, content));
             }
 
             // 2. Write Facts by Entity
             const factsDir = path.join(this.vaultPath, "Facts");
-            if (!fs.existsSync(factsDir)) fs.mkdirSync(factsDir);
+            if (!fs.existsSync(factsDir)) fs.mkdirSync(factsDir, { recursive: true });
 
             const groups: { [key: string]: string[] } = {};
             facts.forEach(f => {
@@ -506,8 +529,9 @@ export class NexusVault {
             });
 
             for (const [entity, list] of Object.entries(groups)) {
+                const filePath = path.join(factsDir, `${entity}.md`);
                 const content = `# Facts about ${entity}\n\n${list.join("\n")}\n\n--- \nUpdated: ${new Date().toISOString()}`;
-                fs.writeFileSync(path.join(factsDir, `${entity}.md`), content);
+                await this.withFileLock(filePath, () => fs.writeFileSync(filePath, content));
             }
 
             console.log("[VAULT] ✅ Markdown Sync Complete.");

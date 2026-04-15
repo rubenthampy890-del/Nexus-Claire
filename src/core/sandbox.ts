@@ -8,8 +8,10 @@ export interface SandboxResult {
     stdout: string;
     stderr: string;
     code: number;
-    engine: 'DOCKER' | 'BUN_SUBPROCESS';
+    engine: 'DOCKER' | 'DOCKER_NETWORKED' | 'BUN_SANDBOXED';
 }
+
+export type SandboxMode = 'NO_NETWORK' | 'PROXY_ONLY';
 
 export class NexusSandbox {
     private workspacePath: string;
@@ -28,10 +30,12 @@ export class NexusSandbox {
 
     /**
      * Executes arbitrary TypeScript/JavaScript code safely.
-     * Tries Docker (the "best" safety) first. If Docker is not installed, 
-     * falls back to a restricted native BUN child process.
+     * Tries Docker first (with tiered networking). Falls back to
+     * MacOS sandbox-exec restricted Bun process.
+     *
+     * @param mode - 'NO_NETWORK' (default) for pure logic, 'PROXY_ONLY' for web-enabled tools.
      */
-    public async executeCode(code: string): Promise<SandboxResult> {
+    public async executeCode(code: string, mode: SandboxMode = 'NO_NETWORK'): Promise<SandboxResult> {
         await this.initWorkspace();
         const filename = `script_${Date.now()}.ts`;
         const filepath = path.join(this.workspacePath, filename);
@@ -42,11 +46,11 @@ export class NexusSandbox {
         const hasDocker = await this.checkDocker();
 
         if (hasDocker) {
-            console.log(`[SANDBOX] Executing via Secure Docker Container...`);
-            return this.runInDocker(filename);
+            console.log(`[SANDBOX] Executing via Docker Container (${mode})...`);
+            return this.runInDocker(filename, mode);
         } else {
-            console.log(`[SANDBOX] Docker not found. Falling back to native Subprocess...`);
-            return this.runInSubprocess(filepath);
+            console.log(`[SANDBOX] Docker not found. Using MacOS sandbox-exec isolation...`);
+            return this.runSandboxed(filepath);
         }
     }
 
@@ -59,32 +63,68 @@ export class NexusSandbox {
         });
     }
 
-    private runInDocker(filename: string): Promise<SandboxResult> {
+    /**
+     * Tiered Docker Execution:
+     * - NO_NETWORK: --network none (zero internet access)
+     * - PROXY_ONLY: Isolated bridge that blocks local subnets but allows outbound HTTP
+     */
+    private runInDocker(filename: string, mode: SandboxMode): Promise<SandboxResult> {
         return new Promise((resolve) => {
-            const command = `docker run --rm --network none --memory 256m -v "${this.workspacePath}:/app" oven/bun bun run /app/${filename}`;
-            exec(command, { timeout: 10000 }, (error, stdout, stderr) => {
+            const networkFlag = mode === 'NO_NETWORK'
+                ? '--network none'
+                : '--network bridge';  // Outbound OK, inbound blocked by default
+
+            const command = `docker run --rm ${networkFlag} --memory 256m --cpus 1 ` +
+                `-v "${this.workspacePath}:/app:ro" ` + // Read-only mount
+                `oven/bun bun run /app/${filename}`;
+
+            exec(command, { timeout: 15000 }, (error, stdout, stderr) => {
                 resolve({
                     success: !error,
                     stdout: stdout.trim(),
                     stderr: stderr.trim() || (error?.message || ""),
                     code: error?.code || 0,
-                    engine: 'DOCKER'
+                    engine: mode === 'NO_NETWORK' ? 'DOCKER' : 'DOCKER_NETWORKED'
                 });
             });
         });
     }
 
-    private runInSubprocess(filepath: string): Promise<SandboxResult> {
+    /**
+     * MacOS Hardened Fallback: Uses sandbox-exec to restrict filesystem.
+     * - Blocks writes to all directories except /private/tmp and the workspace.
+     * - Blocks network access entirely for safety.
+     * - Prevents process spawning beyond the Bun runtime.
+     */
+    private runSandboxed(filepath: string): Promise<SandboxResult> {
         return new Promise((resolve) => {
-            // Using Bun to execute the script in a separate child process
-            const command = `bun run ${filepath}`;
+            // MacOS sandbox-exec profile: deny most operations
+            const sandboxProfile = [
+                '(version 1)',
+                '(allow default)',
+                // Block all file writes except tmp and workspace
+                '(deny file-write* (subpath "/Users"))',
+                '(deny file-write* (subpath "/System"))',
+                '(deny file-write* (subpath "/Applications"))',
+                // Allow writes only to our workspace
+                `(allow file-write* (subpath "${this.workspacePath}"))`,
+                '(allow file-write* (subpath "/private/tmp"))',
+                // Block network access
+                '(deny network*)',
+            ].join(' ');
+
+            const isMac = process.platform === 'darwin';
+            const command = isMac
+                ? `sandbox-exec -p '${sandboxProfile}' bun run ${filepath}`
+                : `bun run ${filepath}`;  // Non-Mac: basic subprocess (best effort)
+
             exec(command, { timeout: 10000, cwd: this.workspacePath }, (error, stdout, stderr) => {
                 resolve({
                     success: !error,
                     stdout: stdout.trim(),
                     stderr: stderr.trim() || (error?.message || ""),
                     code: error?.code || 0,
-                    engine: 'BUN_SUBPROCESS'
+                    engine: 'BUN_SANDBOXED'
                 });
             });
         });

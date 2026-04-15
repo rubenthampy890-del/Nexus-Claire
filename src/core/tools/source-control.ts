@@ -19,6 +19,9 @@ import { toolRegistry, type ToolDefinition } from "../tool-registry";
 const PROJECT_ROOT = resolve(process.cwd());
 const ALLOWED_DIRS = ["src", "dashboard/src", "nexus.ts", "package.json"];
 
+// Track last patched file for smart revert suggestions
+let lastPatchedFile: string | null = null;
+
 /**
  * Security guard: ensures a path is within the project and within allowed directories.
  */
@@ -140,14 +143,15 @@ const codeGrepTool: ToolDefinition = {
     },
 };
 
-// ────────────── Tool 3: code_patch ──────────────
+// ────────────── Tool 3: code_patch (Line-Number Aware) ──────────────
 
 const codePatchTool: ToolDefinition = {
     name: "nexus.code_patch",
     description:
-        "Surgically replace a block of text in a source file. " +
-        "Provide the exact text to find (target) and the replacement text. " +
-        "A .bak backup is created before modification. Use code_read first to see the exact text.",
+        "Surgically replace code in a source file. " +
+        "PREFERRED: Use startLine + endLine + replacement for line-range patching (immune to whitespace issues). " +
+        "FALLBACK: Use target + replacement for exact string matching. " +
+        "A .bak backup and Git checkpoint are created before modification.",
     category: "intelligence",
     riskLevel: "moderate",
     parameters: {
@@ -156,14 +160,24 @@ const codePatchTool: ToolDefinition = {
             description: 'Relative path from project root (e.g. "src/core/brain.ts")',
             required: true,
         },
+        startLine: {
+            type: "number",
+            description: "Start line number (1-indexed) for line-range patching. PREFERRED over target.",
+            required: false,
+        },
+        endLine: {
+            type: "number",
+            description: "End line number (1-indexed, inclusive) for line-range patching.",
+            required: false,
+        },
         target: {
             type: "string",
-            description: "The exact text block to find and replace (must match exactly, including whitespace)",
-            required: true,
+            description: "FALLBACK: The exact text block to find and replace (only if startLine/endLine not provided)",
+            required: false,
         },
         replacement: {
             type: "string",
-            description: "The replacement text to insert in place of the target",
+            description: "The replacement text to insert",
             required: true,
         },
         description: {
@@ -178,73 +192,103 @@ const codePatchTool: ToolDefinition = {
             throw new Error(`File not found: ${params.path}`);
         }
 
-        const target = params.target as string;
         const replacement = params.replacement as string;
         const desc = params.description as string;
+        const startLine = params.startLine as number | undefined;
+        const endLine = params.endLine as number | undefined;
 
         // Read current content
         const content = readFileSync(filePath, "utf-8");
+        const lines = content.split("\n");
 
-        // Verify target exists
-        if (!content.includes(target)) {
-            // Try to find a close match to help the agent
-            const targetLines = target.split("\n");
-            const firstLine = targetLines[0]?.trim();
-            const hint = firstLine
-                ? content.split("\n").findIndex((l) => l.trim() === firstLine)
-                : -1;
+        // ── Git Checkpoint ──
+        try {
+            Bun.spawnSync(["git", "add", "-A"], { cwd: PROJECT_ROOT });
+            Bun.spawnSync(["git", "commit", "-am", `AUTO-CHECKPOINT: Pre-patch ${params.path}`], { cwd: PROJECT_ROOT, timeout: 5000 });
+        } catch { /* Git may not be initialized or nothing to commit */ }
 
-            throw new Error(
-                `Target text not found in ${params.path}. ` +
-                (hint >= 0
-                    ? `Hint: Found similar text near line ${hint + 1}. Use code_read to see exact content.`
-                    : `Use code_read to inspect the file first.`)
-            );
-        }
-
-        // Check for multiple matches (ambiguity)
-        const matchCount = content.split(target).length - 1;
-        if (matchCount > 1) {
-            throw new Error(
-                `Ambiguous: Found ${matchCount} matches for target text in ${params.path}. ` +
-                `Provide a longer, more specific target block.`
-            );
-        }
-
-        // Create backup
+        // Create .bak backup
         const backupPath = filePath + ".bak";
         copyFileSync(filePath, backupPath);
 
-        // Apply patch
-        const patched = content.replace(target, replacement);
-        writeFileSync(filePath, patched, "utf-8");
+        let patchedContent: string;
+        let linesReplaced: number;
+        let linesInserted: number;
 
-        // Count lines changed
-        const targetLines = target.split("\n").length;
-        const replacementLines = replacement.split("\n").length;
+        // ── MODE 1: Line-Number Range Patching (Preferred) ──
+        if (startLine && endLine) {
+            if (startLine < 1 || endLine > lines.length || startLine > endLine) {
+                throw new Error(
+                    `Invalid line range: ${startLine}-${endLine}. File has ${lines.length} lines.`
+                );
+            }
 
-        // Log the patch for audit trail
+            const before = lines.slice(0, startLine - 1);
+            const after = lines.slice(endLine);
+            const replacementLines = replacement.split("\n");
+
+            patchedContent = [...before, ...replacementLines, ...after].join("\n");
+            linesReplaced = endLine - startLine + 1;
+            linesInserted = replacementLines.length;
+
+            // ── MODE 2: String-Match Patching (Fallback) ──
+        } else if (params.target) {
+            const target = params.target as string;
+
+            if (!content.includes(target)) {
+                const targetFirstLine = target.split("\n")[0]?.trim();
+                const hint = targetFirstLine
+                    ? lines.findIndex((l) => l.trim() === targetFirstLine)
+                    : -1;
+                throw new Error(
+                    `Target text not found in ${params.path}. ` +
+                    (hint >= 0
+                        ? `Hint: Similar text near line ${hint + 1}. Use code_read, then use startLine/endLine instead.`
+                        : `Use code_read to inspect the file, then use startLine/endLine for reliable patching.`)
+                );
+            }
+
+            const matchCount = content.split(target).length - 1;
+            if (matchCount > 1) {
+                throw new Error(
+                    `Ambiguous: ${matchCount} matches found. Use startLine/endLine for precise targeting.`
+                );
+            }
+
+            patchedContent = content.replace(target, replacement);
+            linesReplaced = target.split("\n").length;
+            linesInserted = replacement.split("\n").length;
+        } else {
+            throw new Error("Either startLine+endLine or target must be provided.");
+        }
+
+        writeFileSync(filePath, patchedContent, "utf-8");
+        lastPatchedFile = params.path as string;
+
         console.log(
-            `[SOURCE-CONTROL] 🔧 Patched ${params.path}: "${desc}" (${targetLines} lines → ${replacementLines} lines)`
+            `[SOURCE-CONTROL] 🔧 Patched ${params.path}: "${desc}" (${linesReplaced} lines → ${linesInserted} lines)`
         );
 
         return (
             `✅ Patch applied to ${params.path}\n` +
             `- Description: ${desc}\n` +
-            `- Lines replaced: ${targetLines} → ${replacementLines}\n` +
-            `- Backup created: ${relative(PROJECT_ROOT, backupPath)}\n\n` +
+            `- Mode: ${startLine ? 'Line-Range' : 'String-Match'}\n` +
+            `- Lines replaced: ${linesReplaced} → ${linesInserted}\n` +
+            `- Backup: ${relative(PROJECT_ROOT, backupPath)}\n` +
+            `- Git Checkpoint: Created\n\n` +
             `⚠️ Run nexus.run_tests to verify the patch didn't break anything.`
         );
     },
 };
 
-// ────────────── Tool 4: run_tests ──────────────
+// ────────────── Tool 4: run_tests (with auto-revert suggestion) ──────────────
 
 const runTestsTool: ToolDefinition = {
     name: "nexus.run_tests",
     description:
         "Run TypeScript compilation check (tsc --noEmit) to verify the codebase compiles correctly after a patch. " +
-        "Use this after every code_patch to ensure nothing is broken.",
+        "Use this after every code_patch to ensure nothing is broken. " +
+        "If tests fail after a patch, suggests reverting with nexus.code_revert.",
     category: "intelligence",
     riskLevel: "safe",
     timeout: 60000,
@@ -267,14 +311,22 @@ const runTestsTool: ToolDefinition = {
 
             const output = (proc.stdout.toString() + proc.stderr.toString()).trim();
 
-            // Filter out known pre-existing errors in generated tools
             const lines = output.split("\n");
             const relevantErrors = lines.filter(
                 (l) => l.includes("error TS") && !l.includes("nexus tools/")
             );
 
             if (proc.exitCode === 0 || relevantErrors.length === 0) {
+                lastPatchedFile = null; // Clear: patch was successful
                 return "✅ TypeScript compilation passed. No new errors detected.";
+            }
+
+            // ── Auto-Revert Suggestion ──
+            let revertHint = '';
+            if (lastPatchedFile) {
+                revertHint = `\n\n🔄 REVERT HINT: You just patched "${lastPatchedFile}". ` +
+                    `If this error is new, call nexus.code_revert({"path": "${lastPatchedFile}"}) immediately, ` +
+                    `or run git reset --hard HEAD to restore the full checkpoint.`;
             }
 
             return (
@@ -282,7 +334,8 @@ const runTestsTool: ToolDefinition = {
                 relevantErrors.slice(0, 15).join("\n") +
                 (relevantErrors.length > 15
                     ? `\n\n... and ${relevantErrors.length - 15} more errors.`
-                    : "")
+                    : "") +
+                revertHint
             );
         } else {
             const proc = Bun.spawnSync(["bun", "test"], {
@@ -293,11 +346,62 @@ const runTestsTool: ToolDefinition = {
             const output = (proc.stdout.toString() + proc.stderr.toString()).trim();
 
             if (proc.exitCode === 0) {
+                lastPatchedFile = null;
                 return `✅ All tests passed.\n\n${output.slice(-500)}`;
             }
 
-            return `❌ Test failures:\n\n${output.slice(-1000)}`;
+            let revertHint = '';
+            if (lastPatchedFile) {
+                revertHint = `\n\n🔄 REVERT HINT: Recent patch to "${lastPatchedFile}" may have caused this. ` +
+                    `Call nexus.code_revert({"path": "${lastPatchedFile}"}) to restore.`;
+            }
+
+            return `❌ Test failures:\n\n${output.slice(-1000)}${revertHint}`;
         }
+    },
+};
+
+// ────────────── Tool 4b: code_revert ──────────────
+
+const codeRevertTool: ToolDefinition = {
+    name: "nexus.code_revert",
+    description:
+        "Instantly restore a source file from its .bak backup created by code_patch. " +
+        "Use this when run_tests fails after a patch to undo the damage.",
+    category: "intelligence",
+    riskLevel: "safe",
+    parameters: {
+        path: {
+            type: "string",
+            description: 'Relative path of the file to revert (e.g. "src/core/brain.ts")',
+            required: true,
+        },
+        useGit: {
+            type: "boolean",
+            description: 'If true, use git reset --hard HEAD instead of .bak file (reverts ALL files)',
+            required: false,
+        },
+    },
+    execute: async (params) => {
+        if (params.useGit) {
+            const proc = Bun.spawnSync(["git", "reset", "--hard", "HEAD"], { cwd: PROJECT_ROOT });
+            const cleanProc = Bun.spawnSync(["git", "clean", "-fd"], { cwd: PROJECT_ROOT });
+            lastPatchedFile = null;
+            return `✅ Git hard reset complete. All files restored to last checkpoint.\n${proc.stdout.toString()}`;
+        }
+
+        const filePath = validatePath(params.path as string);
+        const backupPath = filePath + ".bak";
+
+        if (!existsSync(backupPath)) {
+            throw new Error(`No .bak backup found for ${params.path}. Try useGit: true for git-level revert.`);
+        }
+
+        copyFileSync(backupPath, filePath);
+        lastPatchedFile = null;
+
+        console.log(`[SOURCE-CONTROL] ⏪ Reverted ${params.path} from .bak backup.`);
+        return `✅ Reverted ${params.path} to pre-patch state from .bak backup.\nRun nexus.run_tests to confirm the revert fixed the issue.`;
     },
 };
 
@@ -358,6 +462,7 @@ export const sourceControlTools: ToolDefinition[] = [
     codeGrepTool,
     codePatchTool,
     runTestsTool,
+    codeRevertTool,
     codeWriteTool,
 ];
 

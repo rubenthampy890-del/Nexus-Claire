@@ -111,7 +111,8 @@ function connect() {
                         percent: 10
                     });
 
-                    const result = await inference.chat([
+                    // Build messages with context compression for long-running tasks
+                    const messages: Array<{ role: 'system' | 'user' | 'assistant', content: string }> = [
                         {
                             role: "system",
                             content: `You are Nexus Claire Sidecar Worker "${SIDECAR_NAME}". Execute the following task precisely and return the result. Be thorough but concise.`
@@ -120,7 +121,12 @@ function connect() {
                             role: "user",
                             content: `${context || ""}\n\nTask: ${directive}`
                         }
-                    ]);
+                    ];
+
+                    // Auto-compress if context is too large (prevents 400 errors)
+                    const compressedMessages = inference.compressHistory(messages);
+
+                    const result = await inference.chat(compressedMessages);
 
                     log(`✅ Task [${taskId}] complete (${result.length} chars)`);
                     sendToMainframe("SATELLITE_TASK_RESULT", {

@@ -1212,18 +1212,52 @@ async function triggerHealingMode(error: Error | string, source: string) {
     ].join("\n");
 
     try {
+        // Step 1: Auto-Checkpoint before healing attempt
+        try {
+            Bun.spawnSync(["git", "add", "-A"], { cwd: process.cwd() });
+            Bun.spawnSync(["git", "commit", "-am", `AUTO-CHECKPOINT: Pre-healing (${source})`], { cwd: process.cwd(), timeout: 5000 });
+            console.log(`[HEALING MODE] 📌 Git checkpoint created.`);
+        } catch { /* Git might not be initialized */ }
+
+        // Step 2: Let Architect attempt the fix
         const response = await (brain as any).architect.sequence(healingPrompt, 'HIGH');
         const result = typeof response === 'string' ? response : JSON.stringify(response);
         console.log(`[HEALING MODE] Architect response: ${result.substring(0, 300)}`);
 
-        try {
-            (brain as any).broadcastToUI?.('CHAT', {
-                role: 'NEXUS',
-                text: `🧬 [HEALING MODE] ${result.substring(0, 500)}`,
-            });
-        } catch { }
+        // Step 3: Verify the fix with TypeScript compiler
+        const testProc = Bun.spawnSync(["bunx", "tsc", "--noEmit"], { cwd: process.cwd(), timeout: 30000 });
+        const testOutput = (testProc.stdout.toString() + testProc.stderr.toString()).trim();
+        const hasErrors = testOutput.split("\n").some(l => l.includes("error TS"));
+
+        if (hasErrors) {
+            // Step 4: AUTOMATIC REVERT — the safety fuse
+            console.error(`[HEALING MODE] ❌ Fix verification FAILED. Auto-reverting via git reset...`);
+            Bun.spawnSync(["git", "reset", "--hard", "HEAD"], { cwd: process.cwd() });
+            Bun.spawnSync(["git", "clean", "-fd"], { cwd: process.cwd() });
+            console.log(`[HEALING MODE] ⏪ Reverted to pre-healing checkpoint. System is stable.`);
+
+            try {
+                (brain as any).broadcastToUI?.('CHAT', {
+                    role: 'NEXUS',
+                    text: `🧬 [HEALING MODE] Attempted fix but it failed verification. Auto-reverted to stable state. Error: ${testOutput.substring(0, 200)}`,
+                });
+            } catch { }
+        } else {
+            console.log(`[HEALING MODE] ✅ Fix verified successfully! System is healthy.`);
+            try {
+                (brain as any).broadcastToUI?.('CHAT', {
+                    role: 'NEXUS',
+                    text: `🧬 [HEALING MODE] ${result.substring(0, 500)}`,
+                });
+            } catch { }
+        }
     } catch (healErr: any) {
         console.error(`[HEALING MODE] Healing attempt failed: ${healErr?.message}`);
+        // Last resort: revert to checkpoint
+        try {
+            Bun.spawnSync(["git", "reset", "--hard", "HEAD"], { cwd: process.cwd() });
+            console.log(`[HEALING MODE] ⏪ Emergency revert after healing crash.`);
+        } catch { }
     }
 }
 

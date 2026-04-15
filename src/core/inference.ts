@@ -137,6 +137,59 @@ export class InferenceService {
         }
     }
 
+    /* ─── Rolling Context Summarizer (Prevents Token Overflow) ─── */
+    private readonly MAX_CONTEXT_CHARS = 25000; // ~8k tokens
+    private readonly PRESERVE_RECENT = 5; // Keep the 5 most recent turns intact
+
+    /**
+     * Compresses message history when it exceeds the token limit.
+     * Preserves the system prompt and the N most recent turns.
+     * Middle messages are collapsed into a single <MEMORY> summary block.
+     */
+    public compressHistory(messages: Message[]): Message[] {
+        const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+
+        if (totalChars <= this.MAX_CONTEXT_CHARS || messages.length <= this.PRESERVE_RECENT + 1) {
+            return messages; // No compression needed
+        }
+
+        console.log(`[INFERENCE] 📦 Context compression triggered: ${totalChars} chars / ${messages.length} messages`);
+
+        // Split: system prompt | compressible middle | recent turns
+        const systemMsg = messages[0]?.role === 'system' ? messages[0] : null;
+        const startIdx = systemMsg ? 1 : 0;
+        const recentStart = Math.max(startIdx, messages.length - this.PRESERVE_RECENT);
+
+        const middleMessages = messages.slice(startIdx, recentStart);
+        const recentMessages = messages.slice(recentStart);
+
+        // Summarize middle messages into a concise memory block
+        const summaryLines = middleMessages.map(m => {
+            const prefix = m.role === 'user' ? 'USER' : 'ASSISTANT';
+            // Truncate long individual messages
+            const content = m.content.length > 200
+                ? m.content.substring(0, 200) + '...'
+                : m.content;
+            return `[${prefix}]: ${content}`;
+        });
+
+        const memoryBlock: Message = {
+            role: 'system',
+            content: `<MEMORY>\nThe following is a compressed summary of ${middleMessages.length} earlier conversation turns:\n${summaryLines.join('\n')}\n</MEMORY>`
+        };
+
+        const compressed = [
+            ...(systemMsg ? [systemMsg] : []),
+            memoryBlock,
+            ...recentMessages
+        ];
+
+        const newChars = compressed.reduce((sum, m) => sum + m.content.length, 0);
+        console.log(`[INFERENCE] ✅ Compressed: ${messages.length} msgs (${totalChars} chars) → ${compressed.length} msgs (${newChars} chars)`);
+
+        return compressed;
+    }
+
     /**
      * Main chat method with smart rotation and priority routing.
      * LOW priority (background tasks) bypasses Cloudflare neurons to save credits.
@@ -160,6 +213,9 @@ export class InferenceService {
         if (!messages.find(m => m.role === 'system')) {
             messages.unshift({ role: 'system', content: this.getSystemPrompt() });
         }
+
+        // ── Rolling Context Compression ──
+        messages = this.compressHistory(messages);
 
         // 1. Primary: Ollama/Kaggle
         if (this.ollamaBaseUrl) {

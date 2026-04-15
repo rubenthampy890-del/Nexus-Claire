@@ -213,6 +213,24 @@ export class NexusCritic {
                     return { action: 'block', reason: `Security Risk: Command obfuscation or piping to shell is forbidden for this tool.` };
                 }
 
+                // Shell Injection Detection: catch chained/escaped commands
+                const injectionPatterns = [
+                    /;\s*\w/,         // cmd1 ; cmd2
+                    /\$\(/,           // $(subcommand)
+                    /`[^`]+`/,        // `backtick subshell`
+                    /\|\|\s*\w/,      // cmd1 || cmd2 (conditional chain)
+                    />\s*\/(?!dev\/null)/,  // redirect to sensitive paths (but allow /dev/null)
+                ];
+                for (const rx of injectionPatterns) {
+                    if (rx.test(paramStr)) {
+                        return {
+                            action: 'requireApproval',
+                            reason: `Shell Injection Risk: Command contains chained/piped operations that may bypass safety checks.`,
+                            approvalId: `injection-${Date.now()}-${toolName}`,
+                        };
+                    }
+                }
+
                 // Check HIGH RISK (Require Approval)
                 for (const pattern of this.HIGH_RISK_MAC_COMMANDS) {
                     if (paramStr.includes(pattern.toLowerCase())) {
