@@ -1,7 +1,7 @@
 # Ruben
-Type: Person
+Type: User
 
-The user and creator.
+Creator and Architect of Nexus Claire.
 
 --- 
-Last Active: 2026-04-08 06:19:53
+Last Active: 2026-04-15 16:33:47

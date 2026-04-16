@@ -135,6 +135,35 @@ export class BrowserEngine {
         NexusCLI.log(`[BROWSER] Navigating to ${url}...`, "INFO");
         try {
             await this.page!.goto(url, { waitUntil: 'load', timeout: 30000 });
+
+            // ═══ AUTO-DISMISS: Cookie consents, overlays, and GDPR modals ═══
+            try {
+                const dismissSelectors = [
+                    // Cookie consent buttons
+                    'button[id*="accept"]', 'button[id*="cookie"]', 'button[id*="consent"]',
+                    'a[id*="accept"]', '#onetrust-accept-btn-handler',
+                    'button.cookie-consent-accept', '.cc-btn.cc-allow',
+                    'button[data-testid="cookie-policy-dialog-accept-button"]',
+                    // Generic "Accept All" / "I Agree" buttons
+                    'button:has-text("Accept All")', 'button:has-text("Accept all")',
+                    'button:has-text("I agree")', 'button:has-text("Got it")',
+                    'button:has-text("OK")', 'button:has-text("Allow all")',
+                    // Close overlay / modal buttons
+                    'button[aria-label="Close"]', 'button[aria-label="close"]',
+                    '.modal-close', '.overlay-close', '[data-dismiss="modal"]'
+                ];
+                for (const sel of dismissSelectors) {
+                    try {
+                        const el = await this.page!.$(sel);
+                        if (el && await el.isVisible()) {
+                            await el.click();
+                            this.log(`Auto-dismissed overlay: ${sel}`);
+                            break; // One dismiss per page load is usually enough
+                        }
+                    } catch { }
+                }
+            } catch { /* non-critical */ }
+
             await this.broadcastSnapshot();
             return { success: true, url: this.page!.url(), title: await this.page!.title() };
         } catch (e: any) {

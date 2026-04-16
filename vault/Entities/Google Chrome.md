@@ -1,7 +1,7 @@
 # Google Chrome
 Type: Web Browser
 
-A web browser used by Ruben
+Chrome is a widely used web browser developed by Google.
 
 --- 
-Last Active: 2026-04-06 08:59:28
+Last Active: 2026-04-15 16:33:47

@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { skillEngine } from "./skill-engine";
 import { socialPersona } from "../agents/social-persona";
+import { outreachLoop } from "./outreach-loop";
 import { TelemetryBot } from "../services/telemetry-bot";
 import { WhatsAppBridge } from "../services/whatsapp-bridge";
 import { registerBuiltinTools } from "./tools/builtin";
@@ -23,6 +24,8 @@ import { registerDeveloperTools, loadGeneratedTools } from "./tools/developer";
 import { registerSourceControlTools } from "./tools/source-control";
 import { registerWebTools } from "./tools/web";
 import { registerGitHubTools } from "./tools/github";
+import { registerEmailTools } from "./tools/email";
+import { registerCrawlerTools } from "./tools/crawler";
 import { registerAppleScriptTools } from "./tools/applescript";
 import { registerBrowserTools, browserEngine } from "./tools/browser";
 import { registerFFmpegTools } from "./tools/ffmpeg";
@@ -92,6 +95,8 @@ export class NexusBrain implements Service {
         registerDeveloperTools();
         registerSourceControlTools();
         registerWebTools();
+        registerEmailTools();
+        registerCrawlerTools();
         registerGitHubTools();
         registerAppleScriptTools();
         registerBrowserTools();
@@ -304,7 +309,7 @@ export class NexusBrain implements Service {
 
         try {
             // GIGA-LAUNCH: Activate all sentient loops concurrently
-            await Promise.all([
+            Promise.all([
                 this.runChatLoop(),
                 this.runGoalLoop(),
                 this.runTelemetryLoop(),
@@ -313,8 +318,11 @@ export class NexusBrain implements Service {
                 this.runOptimizationHeartbeat(),
                 awareness.start(120000),      // Vision Loop (2 min)
                 extractor.launchLoop(900000), // Learning Loop (15 min)
-                socialPersona.launchLoop()    // Social Intelligence
-            ]);
+                socialPersona.launchLoop(),   // Social Intelligence
+                outreachLoop.launchLoop()     // Autonomous Deep OSINT & Email
+            ]).catch(err => {
+                console.error("[BRAIN LOOP ERROR]", err);
+            });
         } catch (fatalError: any) {
             const errorMsg = fatalError?.stack || fatalError?.message || String(fatalError);
             console.error('\n[FATAL ERROR] Main event loops crashed:\n', errorMsg);

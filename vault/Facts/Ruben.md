@@ -1,5 +1,25 @@
 # Facts about Ruben
 
+- Uses the Instagram account 'reu.bennn_'. (Relevance: 1)
+- Explicitly requires a real login to his Instagram account, using the username 'reu.bennn_'. (Relevance: 1)
+- Has provided account ID and password to Nexus. (Relevance: 1)
+- Explicitly requires real login to his Instagram account. (Relevance: 1)
+- Explicitly requires real login to his Instagram account. (Relevance: 1)
+- Has provided account ID and password to Nexus. (Relevance: 1)
+- He uses the Instagram account 'reu.bennn_'. (Relevance: 1)
+- An error occurred when attempting to execute the 'grep -r 'Window Manager' src/core' command in the specified working directory. (Relevance: 1)
+- The working directory provided for commands is '/Users/basilthampy/Music/antigravity/new automative ai/Nexus-Claire'. (Relevance: 1)
+- Has provided his account ID and password to Nexus. (Relevance: 1)
+- Wants to automate a real login to his Instagram account and explicitly requires real-world execution over hallucination. (Relevance: 1)
+- Provided his account ID and password to Nexus. (Relevance: 1)
+- Uses the Instagram account 'reu.bennn_'. (Relevance: 1)
+- Has an Instagram account with the handle 'reu.bennn_'. (Relevance: 1)
+- Monitors his notification bar for login alerts. (Relevance: 1)
+- Monitors his notification bar for login alerts. (Relevance: 1)
+- Has an Instagram account with the handle 'reu.bennn_'. (Relevance: 1)
+- Uses the Instagram account 'reu.bennn_'. (Relevance: 1)
+- Has provided his account ID and password to Nexus. (Relevance: 1)
+- Wants to automate a real login to his Instagram account and explicitly requires real-world execution over hallucination. (Relevance: 1)
 - Provided credentials (account name: reu.bennn_, password: Ruben@890) for Instagram login. (Relevance: 1)
 - Is providing an Instagram account ID to initiate a login sequence. (Relevance: 1)
 - Wants Nexus to have the capability to log into his social media accounts if credentials are provided. (Relevance: 1)
@@ -23,4 +43,4 @@
 - Interacts with Nexus (Relevance: 1)
 
 --- 
-Updated: 2026-04-08T06:16:48.490Z
+Updated: 2026-04-15T16:37:38.323Z

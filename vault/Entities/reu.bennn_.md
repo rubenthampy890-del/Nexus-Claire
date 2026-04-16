@@ -1,7 +1,7 @@
 # reu.bennn_
-Type: Account
+Type: Instagram Account
 
-The Instagram username provided for authentication.
+An Instagram account belonging to Ruben.
 
 --- 
-Last Active: 2026-04-08 06:12:03
+Last Active: 2026-04-08 06:20:36

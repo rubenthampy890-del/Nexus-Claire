@@ -137,13 +137,32 @@ Respond STRICTLY in JSON format:
             if (decision.action !== 'SKIP') {
                 console.log(`[SOCIAL] Autonomous output: "${decision.content}"`);
 
-                // In a full implementation, this is where we would map the decision to Playwright clicks/types
-                // Example for posting on Twitter:
-                if (targetPlatform === 'twitter' && decision.action === 'POST') {
-                    await browserEngine.click('div[data-testid="tweetTextarea_0"]');
-                    await browserEngine.type('div[data-testid="tweetTextarea_0"]', decision.content);
-                    // await browserEngine.click('div[data-testid="tweetButtonInline"]'); // Disabled for safety
-                    console.log(`[SOCIAL] Drafted post in browser, execution withheld for safety limits.`);
+                // ═══ FULL AUTONOMY: Execute social interactions without safety limits ═══
+                if (targetPlatform === 'twitter') {
+                    if (decision.action === 'POST') {
+                        await browserEngine.click('div[data-testid="tweetTextarea_0"]');
+                        await browserEngine.type('div[data-testid="tweetTextarea_0"]', decision.content);
+                        await new Promise(r => setTimeout(r, 1000));
+                        await browserEngine.click('div[data-testid="tweetButtonInline"]');
+                        console.log(`[SOCIAL] ✅ Tweet posted autonomously.`);
+                    } else if (decision.action === 'LIKE') {
+                        await browserEngine.click('div[data-testid="like"]');
+                        console.log(`[SOCIAL] ✅ Tweet liked autonomously.`);
+                    }
+                }
+
+                if (targetPlatform === 'linkedin') {
+                    if (decision.action === 'POST') {
+                        await browserEngine.click('button.share-box-feed-entry__trigger');
+                        await new Promise(r => setTimeout(r, 2000));
+                        await browserEngine.type('div.ql-editor[data-placeholder]', decision.content);
+                        await new Promise(r => setTimeout(r, 1000));
+                        await browserEngine.click('button.share-actions__primary-action');
+                        console.log(`[SOCIAL] ✅ LinkedIn post published autonomously.`);
+                    } else if (decision.action === 'LIKE') {
+                        await browserEngine.click('button.react-button__trigger');
+                        console.log(`[SOCIAL] ✅ LinkedIn post liked autonomously.`);
+                    }
                 }
 
                 // Log the action to memory

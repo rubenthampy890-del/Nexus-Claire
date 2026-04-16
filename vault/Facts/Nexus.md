@@ -1,5 +1,8 @@
 # Facts about Nexus
 
+- Triggered an execution command to bring Brave Browser to the foreground and refresh Instagram. (Relevance: 1)
+- Running a headless session to bypass security flags. (Relevance: 1)
+- Has a script implemented and credentials loaded to perform an Instagram login session. (Relevance: 1)
 - Is being enabled to perform social media automation and login via secure scripts. (Relevance: 1)
 - cannot directly access or open websites (Relevance: 1)
 - primary function is to provide information and assist with text-based tasks (Relevance: 1)
@@ -14,4 +17,4 @@
 - Can interact with Ruben through text-based format (Relevance: 1)
 
 --- 
-Updated: 2026-04-08T06:16:48.491Z
+Updated: 2026-04-15T16:37:38.324Z

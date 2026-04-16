@@ -83,7 +83,7 @@ async function fetchURL(url: string): Promise<string> {
             .replace(/\s+/g, ' ')
             .trim();
 
-        return text.substring(0, 3000);
+        return text.substring(0, 30000);
     } catch (err: any) {
         return `Error fetching URL: ${err.message}`;
     }
