@@ -76,6 +76,10 @@ export class NexusBrain implements Service {
     private whatsappLink: WhatsAppBridge | null = null;
     private neuralLink: NeuralLink | null = null;
 
+    // Focus Mode: When true, all background heartbeats yield to give
+    // the Engineer agent 100% of inference bandwidth.
+    public isAutonomousFocusMode = false;
+
 
     constructor() {
         this.architect = new NexusArchitect();
@@ -263,32 +267,35 @@ export class NexusBrain implements Service {
         // ═══════════════════════════════════════════════════════
         // ██  AUTONOMOUS HOUR MODE — Self-Improvement Directive  ██
         // ═══════════════════════════════════════════════════════
-        nexusCritic.enableSessionTrust(60); // 60-minute auto-approve window
-        NexusCLI.showStatus("Session Trust", "60 MIN AUTONOMOUS", "#FF9900");
+        nexusCritic.enableSessionTrust(30); // 30-minute auto-approve window
+        NexusCLI.showStatus("Session Trust", "30 MIN AUTONOMOUS", "#FF9900");
+
+        // Engage Focus Mode: freeze all background inference consumers
+        this.isAutonomousFocusMode = true;
+        console.log(`[FOCUS MODE] \u2705 Activated. Background heartbeats frozen for autonomous sprint.`);
 
         // Auto-inject the self-improvement directive after a brief boot delay
         setTimeout(() => {
             const directive = [
-                "You have been given 60 minutes of full autonomous operation. Your directive:",
+                "You have been given 30 minutes of full autonomous operation. Your directive:",
                 "",
                 "1. AUDIT — Scan your own source code (src/core/*.ts) for bugs, inefficiencies, and missing features.",
                 "2. IMPROVE — Fix what you find, optimize what's slow, add what's missing.",
-                "3. LEARN — Search the web for latest AI agent architecture patterns and integrate useful ideas.",
-                "4. DOCUMENT — Update code comments and README to reflect your changes.",
-                "5. TEST — Verify EVERY change compiles cleanly via nexus.run_tests({\"mode\": \"typecheck\"}).",
-                "6. PUSH — After each verified improvement, commit and push to GitHub.",
+                "3. DOCUMENT CRITICALLY — Continuously document EVERYTHING you are doing during this 30 minute session into a dedicated folder. Create a folder called 'autonomous_hour_logs' and write detailed markdown reports inside it explaining the bugs you found, the files you edited, and the new things you learned.",
+                "4. TEST — Verify EVERY change compiles cleanly via nexus.run_tests({\"mode\": \"typecheck\"}).",
+                "5. PUSH — After each verified improvement, commit and push to GitHub.",
                 "",
                 "You have full access to your filesystem, GitHub, the web, and all tools.",
                 "Session Trust is active — no approval popups will interrupt you.",
                 "Git checkpoints are active — every code_patch creates a backup automatically.",
                 "",
-                "Begin now. Report progress every 15 minutes via the dashboard chat."
+                "Begin now. Loop continuously and do not stop until the 30 minutes are up."
             ].join("\n");
 
             this.chatQueue.push({ text: directive, source: 'UI' });
-            this.broadcastToUI('CHAT', { role: 'USER', text: `🚀 [AUTONOMOUS HOUR] Directive injected.` });
-            this.broadcastToUI('LOG', `[AUTONOMOUS] 60-minute self-improvement session started.`);
-            console.log(`\n[AUTONOMOUS HOUR] 🚀 Self-improvement directive injected. Session Trust active for 60 minutes.\n`);
+            this.broadcastToUI('CHAT', { role: 'USER', text: `🚀 [AUTONOMOUS RUN] 30-min Directive injected.` });
+            this.broadcastToUI('LOG', `[AUTONOMOUS] 30-minute self-improvement session started.`);
+            console.log(`\n[AUTONOMOUS RUN] 🚀 Self-improvement directive injected. Session Trust active for 30 minutes.\n`);
         }, 10000); // 10 second boot delay
 
         // Start concurrent service loops
@@ -1032,6 +1039,9 @@ If you believe the task is genuinely impossible right now, say [GIVE_UP: reason]
         while (this.chatLoopActive) {
             await new Promise(r => setTimeout(r, 600000)); // Check every 10 mins
 
+            // Focus Mode: yield all inference bandwidth to Engineer
+            if (this.isAutonomousFocusMode) continue;
+
             // Skip if user is actively chatting
             if (this.chatQueue.length > 0) continue;
 
@@ -1124,6 +1134,12 @@ Analyze state. If nothing urgent/noteworthy, say "[SILENT]". Else, 1 short casua
         await new Promise(r => setTimeout(r, 120000));
 
         while (this.chatLoopActive) {
+            // Focus Mode: yield inference bandwidth
+            if (this.isAutonomousFocusMode) {
+                await new Promise(r => setTimeout(r, 60000));
+                continue;
+            }
+
             try {
                 // 1. Broadcast current vault state to dashboard
                 const allFacts = await vault.getAllFacts();
@@ -1157,6 +1173,12 @@ Analyze state. If nothing urgent/noteworthy, say "[SILENT]". Else, 1 short casua
         await new Promise(r => setTimeout(r, 300000));
 
         while (this.chatLoopActive) {
+            // Focus Mode: yield inference bandwidth
+            if (this.isAutonomousFocusMode) {
+                await new Promise(r => setTimeout(r, 60000));
+                continue;
+            }
+
             try {
                 this.broadcastToUI('LOG', "[OPTIMIZER] Scanning codebase for technical debt and TODOs...");
 

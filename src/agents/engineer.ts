@@ -70,64 +70,79 @@ export class NexusEngineer {
                         timestamp: Date.now()
                     });
                 } else {
-                    console.warn(`[ENGINEER] 🔴 Task failed. Initiating Self-Healing cycle...`);
-                    awareness.reportEvent({
-                        type: 'struggle',
-                        source: 'NexusEngineer',
-                        message: `Failed task: ${taskDescription}. Response: ${resultResponse}`,
-                        timestamp: Date.now()
-                    });
+                    console.warn(`[ENGINEER] 🔴 Task failed. Result: ${resultResponse.substring(0, 200)}`);
 
-                    // TRIGGER REPAIR: Ask Architect to analyze and generate a patch
-                    const repairPrompt = `
-                    An autonomous engineering task failed.
-                    DIRECTIVE: ${taskDescription}
-                    CONTEXT: ${context || 'None'}
-                    LAST OUTPUT: ${resultResponse}
-                    
-                    Attached is a visual capture of the workspace at the time of failure.
-                    Analyze the failure and provide exactly ONE new [EXEC: ...] directive that fixes the issue and completes the goal.`;
-
+                    // Check if we're in Focus Mode — if so, skip the heavy repair cycle
+                    // to avoid competing with the primary autonomous directive
+                    let inFocusMode = false;
                     try {
-                        let visionData: { data: string; mimeType: string } | undefined = undefined;
+                        const { brain } = require('../core/brain');
+                        inFocusMode = brain?.isAutonomousFocusMode === true;
+                    } catch { }
 
-                        // Attempt to capture visual context of the failure
-                        const snapshotPath = `/tmp/failure_${Date.now()}.png`;
+                    if (inFocusMode) {
+                        console.log(`[ENGINEER] Focus Mode active — skipping vision repair. Moving to next task.`);
+                        awareness.reportEvent({
+                            type: 'struggle',
+                            source: 'NexusEngineer',
+                            message: `[Focus Mode] Task skipped after failure: ${taskDescription.slice(0, 100)}`,
+                            timestamp: Date.now()
+                        });
+                        // Don't recurse — let the autonomous loop pick the next task
+                    } else {
+                        // Normal mode: full vision-based self-repair cycle
+                        awareness.reportEvent({
+                            type: 'struggle',
+                            source: 'NexusEngineer',
+                            message: `Failed task: ${taskDescription}. Response: ${resultResponse}`,
+                            timestamp: Date.now()
+                        });
+
+                        const repairPrompt = `
+                        An autonomous engineering task failed.
+                        DIRECTIVE: ${taskDescription}
+                        CONTEXT: ${context || 'None'}
+                        LAST OUTPUT: ${resultResponse}
+                        
+                        Attached is a visual capture of the workspace at the time of failure.
+                        Analyze the failure and provide exactly ONE new [EXEC: ...] directive that fixes the issue and completes the goal.`;
+
                         try {
-                            await PlatformUtils.captureScreen(snapshotPath);
-                            const buffer = await Bun.file(snapshotPath).arrayBuffer();
-                            visionData = {
-                                data: Buffer.from(buffer).toString('base64'),
-                                mimeType: 'image/png'
-                            };
-                            // Cleanup temp file
-                            await Bun.write(snapshotPath, "");
-                        } catch (snapErr) {
-                            console.warn(`[ENGINEER] Failed to capture visual failure context: ${snapErr}`);
+                            let visionData: { data: string; mimeType: string } | undefined = undefined;
+
+                            const snapshotPath = `/tmp/failure_${Date.now()}.png`;
+                            try {
+                                await PlatformUtils.captureScreen(snapshotPath);
+                                const buffer = await Bun.file(snapshotPath).arrayBuffer();
+                                visionData = {
+                                    data: Buffer.from(buffer).toString('base64'),
+                                    mimeType: 'image/png'
+                                };
+                                await Bun.write(snapshotPath, "");
+                            } catch (snapErr) {
+                                console.warn(`[ENGINEER] Failed to capture visual failure context: ${snapErr}`);
+                            }
+
+                            const messages = agent.getMessages();
+                            messages.push({ role: 'user', content: repairPrompt });
+
+                            const lastMessage = messages[messages.length - 1];
+                            if (visionData && lastMessage) {
+                                lastMessage.image = visionData;
+                            }
+
+                            const repairDirective = await inference.chat(messages);
+                            const match = repairDirective.match(/\[EXEC:(.*?)\]/is);
+
+                            if (match && match[1]) {
+                                console.log(`[ENGINEER] 🔧 Repair directive generated: ${match[1].trim()}`);
+                                this.executeTask(match[1].trim(), context, retryCount + 1);
+                            } else {
+                                console.error(`[ENGINEER] Architect failed to produce a valid repair directive.`);
+                            }
+                        } catch (e: any) {
+                            console.error(`[ENGINEER] Repair cycle failed: ${e.message}`);
                         }
-
-                        // Prepare messages for analysis
-                        const messages = agent.getMessages();
-                        messages.push({ role: 'user', content: repairPrompt });
-
-                        // Attach vision data to the prompt if available
-                        const lastMessage = messages[messages.length - 1];
-                        if (visionData && lastMessage) {
-                            lastMessage.image = visionData;
-                        }
-
-                        // Use the inference service directly as the agent doesn't have a .think method
-                        const repairDirective = await inference.chat(messages);
-                        const match = repairDirective.match(/\[EXEC:(.*?)\]/is);
-
-                        if (match && match[1]) {
-                            console.log(`[ENGINEER] 🔧 Repair directive generated: ${match[1].trim()}`);
-                            this.executeTask(match[1].trim(), context, retryCount + 1);
-                        } else {
-                            console.error(`[ENGINEER] Architect failed to produce a valid repair directive. Response: ${repairDirective}`);
-                        }
-                    } catch (e: any) {
-                        console.error(`[ENGINEER] Repair cycle failed: ${e.message}`);
                     }
                 }
 

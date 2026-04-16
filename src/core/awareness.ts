@@ -145,6 +145,15 @@ export class NexusAwarenessService {
     }
 
     private handleStruggle(event: AwarenessEvent): void {
+        // Focus Mode: suppress auto-repair to avoid competing with Engineer
+        try {
+            const { brain } = require('./brain');
+            if (brain?.isAutonomousFocusMode) {
+                console.log(`[AWARENESS] Focus Mode active — suppressing auto-repair for: ${event.source}`);
+                return;
+            }
+        } catch { /* brain not yet initialized */ }
+
         const now = Date.now();
         if (now - this.lastProactiveTask < this.PROACTIVE_COOLDOWN) {
             console.log("[AWARENESS] Skipping proactive fix: Cooldown active.");
